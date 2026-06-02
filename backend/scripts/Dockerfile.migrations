@@ -1,0 +1,31 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+
+RUN dotnet tool install --global dotnet-ef --version 10.0.1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="${PATH}:/root/.dotnet/tools"
+ENV NUGET_PACKAGES=/root/.nuget/packages
+
+WORKDIR /src
+
+COPY backend/backend.Domain/backend.Domain.csproj backend/backend.Domain/
+COPY backend/backend.Shared/backend.Shared.csproj backend/backend.Shared/
+COPY backend/backend.Infrastructure/backend.Infrastructure.csproj backend/backend.Infrastructure/
+COPY backend/backend.Users/backend.Users.csproj backend/backend.Users/
+COPY backend/backend.Orders/backend.Orders.csproj backend/backend.Orders/
+COPY backend/backend.Tasks/backend.Tasks.csproj backend/backend.Tasks/
+COPY backend/backend.Payments/backend.Payments.csproj backend/backend.Payments/
+COPY backend/backend.Api/backend.Api.csproj backend/backend.Api/
+COPY backend/backend.Auth.Api/backend.Auth.Api.csproj backend/backend.Auth.Api/
+COPY backend/backend.ServiceDefaults/backend.ServiceDefaults.csproj backend/backend.ServiceDefaults/
+
+RUN dotnet restore backend/backend.Domain/backend.Domain.csproj
+
+COPY backend/ backend/
+
+WORKDIR /src
+
+ENTRYPOINT ["bash", "backend/scripts/apply-migrations.sh"]

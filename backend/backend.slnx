@@ -1,0 +1,32 @@
+<Solution>
+	<Folder Name="/Hosts/">
+		<Project Path="backend.AppHost/backend.AppHost.csproj" />
+		<Project Path="backend.Api/backend.Api.csproj" />
+		<Project Path="backend.Auth.Api/backend.Auth.Api.csproj" />
+	</Folder>
+
+	<Folder Name="/Services/">
+		<Project Path="backend.Users/backend.Users.csproj" />
+		<Project Path="backend.Users.Api/backend.Users.Api.csproj" />
+		<Project Path="backend.Orders/backend.Orders.csproj" />
+		<Project Path="backend.Payments/backend.Payments.csproj" />
+		<Project Path="backend.Tasks/backend.Tasks.csproj" />
+		<Project Path="backend.Orders.Api/backend.Orders.Api.csproj" />
+		<Project Path="backend.Payments.Api/backend.Payments.Api.csproj" />
+		<Project Path="backend.Tasks.Api/backend.Tasks.Api.csproj" />
+	</Folder>
+
+	<Folder Name="/Core/">
+		<Project Path="backend.Domain/backend.Domain.csproj" />
+		<Project Path="backend.Shared/backend.Shared.csproj" />
+	</Folder>
+
+	<Folder Name="/Infrastructure/">
+		<Project Path="backend.Infrastructure/backend.Infrastructure.csproj" />
+		<Project Path="backend.ServiceDefaults/backend.ServiceDefaults.csproj" />
+	</Folder>
+
+	<Folder Name="/Tests/">
+		<Project Path="backend.Tests/backend.Tests.csproj" />
+	</Folder>
+</Solution>

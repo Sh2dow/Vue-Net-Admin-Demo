@@ -1,0 +1,9 @@
+.git
+.gitignore
+.idea
+**/bin
+**/obj
+**/node_modules
+**/TestResults
+artifacts
+frontend/dist

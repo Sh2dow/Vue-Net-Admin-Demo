@@ -1,0 +1,188 @@
+services:
+  https_proxy:
+    build:
+      context: .
+      dockerfile: infra/nginx-ssl/Dockerfile
+    container_name: https_proxy
+    depends_on:
+      frontend:
+        condition: service_started
+      backend_api:
+        condition: service_started
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST}
+    ports:
+      - "80:80"
+      - "443:443"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend_migrations:
+    build:
+      context: .
+      dockerfile: backend/scripts/Dockerfile.migrations
+    container_name: backend_migrations
+    environment:
+      AUTH_DB_CONNECTION_STRING: ${AUTH_DB_CONNECTION_STRING}
+      TASKS_DB_CONNECTION_STRING: ${TASKS_DB_CONNECTION_STRING}
+      ORDERS_DB_CONNECTION_STRING: ${ORDERS_DB_CONNECTION_STRING}
+      PAYMENTS_DB_CONNECTION_STRING: ${PAYMENTS_DB_CONNECTION_STRING}
+
+  backend_auth_api:
+    build:
+      context: .
+      dockerfile: backend/backend.Auth.Api/Dockerfile
+    container_name: backend_auth_api
+    depends_on:
+      backend_migrations:
+        condition: service_completed_successfully
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Auth: ${AUTH_DB_CONNECTION_STRING}
+    ports:
+      - "5001:8080"
+
+  backend_users_api:
+    build:
+      context: .
+      dockerfile: backend/backend.Users.Api/Dockerfile
+    container_name: backend_users_api
+    depends_on:
+      backend_auth_api:
+        condition: service_started
+      backend_migrations:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Auth: ${AUTH_DB_CONNECTION_STRING}
+      ConnectionStrings__Orders: ${ORDERS_DB_CONNECTION_STRING}
+      RabbitMq__Uri: amqp://guest:guest@rabbitmq:5672
+      RabbitMq__Enabled: ${RABBITMQ_ENABLED:-true}
+      Auth__Authority: http://backend_auth_api:8080
+    ports:
+      - "5005:8080"
+
+  backend_tasks_api:
+    build:
+      context: .
+      dockerfile: backend/backend.Tasks.Api/Dockerfile
+    container_name: backend_tasks_api
+    depends_on:
+      backend_migrations:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Auth: ${AUTH_DB_CONNECTION_STRING}
+      ConnectionStrings__Tasks: ${TASKS_DB_CONNECTION_STRING}
+      RabbitMq__Uri: amqp://guest:guest@rabbitmq:5672
+      RabbitMq__Enabled: ${RABBITMQ_ENABLED:-true}
+      Auth__Authority: http://backend_auth_api:8080
+    ports:
+      - "5002:8080"
+
+  backend_orders_api:
+    build:
+      context: .
+      dockerfile: backend/backend.Orders.Api/Dockerfile
+    container_name: backend_orders_api
+    depends_on:
+      backend_auth_api:
+        condition: service_started
+      backend_migrations:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Orders: ${ORDERS_DB_CONNECTION_STRING}
+      ConnectionStrings__Payments: ${PAYMENTS_DB_CONNECTION_STRING}
+      RabbitMq__Uri: amqp://guest:guest@rabbitmq:5672
+      RabbitMq__Enabled: ${RABBITMQ_ENABLED:-true}
+      Auth__Authority: http://backend_auth_api:8080
+      AuthService__BaseUrl: http://backend_auth_api:8080
+    ports:
+      - "5003:8080"
+
+  backend_payments_api:
+    build:
+      context: .
+      dockerfile: backend/backend.Payments.Api/Dockerfile
+    container_name: backend_payments_api
+    depends_on:
+      backend_migrations:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Auth: ${AUTH_DB_CONNECTION_STRING}
+      ConnectionStrings__Orders: ${ORDERS_DB_CONNECTION_STRING}
+      ConnectionStrings__Payments: ${PAYMENTS_DB_CONNECTION_STRING}
+      RabbitMq__Uri: amqp://guest:guest@rabbitmq:5672
+      RabbitMq__Enabled: ${RABBITMQ_ENABLED:-true}
+    ports:
+      - "5004:8080"
+
+  backend_api:
+    build:
+      context: .
+      dockerfile: backend/backend.Api/Dockerfile
+    container_name: backend_api
+    depends_on:
+      backend_auth_api:
+        condition: service_started
+      backend_users_api:
+        condition: service_started
+      backend_tasks_api:
+        condition: service_started
+      backend_orders_api:
+        condition: service_started
+      backend_payments_api:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      AuthService__BaseUrl: http://backend_auth_api:8080
+      DownstreamServices__UsersBaseUrl: http://backend_users_api:8080
+      DownstreamServices__TasksBaseUrl: http://backend_tasks_api:8080
+      DownstreamServices__OrdersBaseUrl: http://backend_orders_api:8080
+      DownstreamServices__PaymentsBaseUrl: http://backend_payments_api:8080
+      RabbitMq__Uri: amqp://guest:guest@rabbitmq:5672
+      Auth__Authority: http://backend_auth_api:8080
+    ports:
+      - "5000:8080"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_AUTHORITY: http://backend_auth_api:8080
+        VITE_API_URL: ${VITE_API_URL:-}
+    container_name: frontend
+    depends_on:
+      backend_api:
+        condition: service_started
+    ports:
+      - "5173:80"
