@@ -11,7 +11,6 @@ using FluentValidation;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 

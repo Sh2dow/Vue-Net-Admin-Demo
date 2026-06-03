@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace backend.Domain.Migrations
+namespace backend.Domain.Migrations.AuthDb
 {
     /// <inheritdoc />
     public partial class Initial : Migration

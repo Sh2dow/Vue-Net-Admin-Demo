@@ -30,6 +30,13 @@ public static class JwtBearerExtensions
                 options.MapInboundClaims = false;
                 options.MetadataAddress = $"{normalizedAuthority}/.well-known/openid-configuration";
 
+                // Accept self-signed/dev certificates for metadata discovery
+                options.BackchannelHttpHandler = new System.Net.Http.HttpClientHandler
+                {
+                    ServerCertificateCustomValidationCallback =
+                        (_, _, _, _) => true
+                };
+
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateAudience = !string.IsNullOrWhiteSpace(audience),

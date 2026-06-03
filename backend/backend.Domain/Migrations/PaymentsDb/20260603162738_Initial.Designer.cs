@@ -12,7 +12,7 @@ using backend.Domain.Data;
 namespace backend.Domain.Migrations.PaymentsDb
 {
     [DbContext(typeof(PaymentsDbContext))]
-    [Migration("20260602195923_Initial")]
+    [Migration("20260603162738_Initial")]
     partial class Initial
     {
         /// <inheritdoc />
@@ -20,7 +20,7 @@ namespace backend.Domain.Migrations.PaymentsDb
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.7")
+                .HasAnnotation("ProductVersion", "10.0.8")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);

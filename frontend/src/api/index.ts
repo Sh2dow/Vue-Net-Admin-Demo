@@ -51,24 +51,46 @@ export const tasksApi = {
 // --- Orders API ---
 export interface OrderItem {
     id: string;
-    orderType: "product" | "subscription" | "coupon";
+    orderType: "digital" | "physical";
     totalAmount: number;
     status: string;
     paymentMethod: string;
     createdAtUtc: string;
 }
 
-export interface WorkflowStep {
-    stepName: string;
-    stepState: string;
-    error?: string | null;
+export interface OrderTimelineItem {
+    key: string;
+    label: string;
+    state: string;
     occurredAtUtc?: string | null;
+    description: string;
+}
+
+export interface OrderPaymentDetails {
+    orderId: string;
+    paymentId: string | null;
+    currentAttemptNumber: number;
+    orderStatus: string;
+    sagaState: string;
+    paymentState: string;
+    createdAtUtc: string;
+    failureReason: string | null;
+    events: OrderPaymentEvent[];
+}
+
+export interface OrderPaymentEvent {
+    attemptNumber: number;
+    sequenceNumber: number;
+    eventType: string;
+    occurredAtUtc: string;
+    description: string;
+    reason: string | null;
 }
 
 export interface OrderWorkflow {
-    orderType: string;
-    totalAmount: number;
-    steps: WorkflowStep[];
+    order: OrderItem;
+    payment: OrderPaymentDetails;
+    timeline: OrderTimelineItem[];
 }
 
 export const ordersApi = {

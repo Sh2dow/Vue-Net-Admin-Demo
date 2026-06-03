@@ -9,7 +9,7 @@ public sealed class PaymentsDbContextFactory : IDesignTimeDbContextFactory<Payme
 {
     public PaymentsDbContext CreateDbContext(string[] args)
     {
-        var envConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Default");
+        var envConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Payments");
         if (!string.IsNullOrWhiteSpace(envConnectionString))
         {
             return CreateDbContext(envConnectionString);
@@ -24,11 +24,11 @@ public sealed class PaymentsDbContextFactory : IDesignTimeDbContextFactory<Payme
             .AddEnvironmentVariables()
             .Build();
 
-        var connectionString = configuration.GetConnectionString("Default");
+        var connectionString = configuration.GetConnectionString("Payments");
         if (string.IsNullOrWhiteSpace(connectionString))
         {
             throw new InvalidOperationException(
-                $"Connection string 'Default' was not found. Configuration base path: '{basePath}'.");
+                $"Connection string 'Payments' was not found. Configuration base path: '{basePath}'.");
         }
 
         return CreateDbContext(connectionString);

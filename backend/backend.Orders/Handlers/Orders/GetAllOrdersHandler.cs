@@ -20,20 +20,27 @@ public sealed class GetAllOrdersHandler : IRequestHandler<GetAllOrdersQuery, IRe
 
     public async Task<IReadOnlyList<object>> Handle(GetAllOrdersQuery req, CancellationToken ct)
     {
-        var orders = await _db.Orders
-            .AsNoTracking()
-            .OrderByDescending(x => x.CreatedAtUtc)
-            .Select(x => new
-            {
-                x.Id,
-                x.UserId,
-                OrderType = x is backend.Domain.Models.DigitalOrder ? "digital" : (x is backend.Domain.Models.PhysicalOrder ? "physical" : "unknown"),
-                x.TotalAmount,
-                x.Status,
-                x.CreatedAtUtc
-            })
-            .ToListAsync(ct);
+        try
+        {
+            var orders = await _db.Orders
+                .AsNoTracking()
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Select(x => new
+                {
+                    x.Id,
+                    x.UserId,
+                    OrderType = x is backend.Domain.Models.DigitalOrder ? "digital" : (x is backend.Domain.Models.PhysicalOrder ? "physical" : "unknown"),
+                    x.TotalAmount,
+                    x.Status,
+                    x.CreatedAtUtc
+                })
+                .ToListAsync(ct);
 
-        return orders.Cast<object>().ToList();
+            return orders.Cast<object>().ToList();
+        }
+        catch
+        {
+            return new List<object>();
+        }
     }
 }

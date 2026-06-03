@@ -31,55 +31,62 @@ public sealed class GetOrderPaymentDetailsHandler : IRequestHandler<GetOrderPaym
 
     public async Task<OrderPaymentDetailsDto?> Handle(GetOrderPaymentDetailsQuery req, CancellationToken ct)
     {
-        var userId = await _effectiveUser.GetUserIdAsync(ct);
-        var order = await _ordersDb.Orders
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == req.OrderId && x.UserId == userId, ct);
+        try
+        {
+            var userId = await _effectiveUser.GetUserIdAsync(ct);
+            var order = await _ordersDb.Orders
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == req.OrderId && x.UserId == userId, ct);
 
-        if (order == null)
+            if (order == null)
+            {
+                return null;
+            }
+
+            var saga = await _ordersDb.OrderSagaStates
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.OrderId == req.OrderId, ct);
+
+            var paymentEvents = await _paymentsDb.PaymentEventRecords
+                .AsNoTracking()
+                .Where(x => x.OrderId == req.OrderId)
+                .OrderBy(x => x.SequenceNumber)
+                .ToListAsync(ct);
+
+            var failureReason = paymentEvents
+                .Where(x => string.Equals(x.EventType, nameof(PaymentFailedMessage), StringComparison.Ordinal))
+                .Select(x => TryGetFailureReason(x.Data))
+                .LastOrDefault(x => !string.IsNullOrWhiteSpace(x));
+
+            var paymentState = ResolvePaymentState(order.Status, saga?.State, paymentEvents);
+            var currentAttemptNumber = paymentEvents
+                .OrderByDescending(x => x.AttemptNumber)
+                .Select(x => x.AttemptNumber)
+                .FirstOrDefault();
+
+            return new OrderPaymentDetailsDto(
+                order.Id,
+                saga?.PaymentId ?? paymentEvents.LastOrDefault()?.PaymentId,
+                currentAttemptNumber,
+                order.Status,
+                saga?.State ?? OrderSagaStates.PaymentPending,
+                paymentState,
+                order.CreatedAtUtc,
+                saga?.LastPaymentRequestedAtUtc,
+                saga?.LastPaymentCompletedAtUtc,
+                saga?.ExecutionDispatchedAtUtc,
+                saga?.ExecutionStartedAtUtc,
+                saga?.ExecutionCompletedAtUtc,
+                saga?.ExecutionFailedAtUtc,
+                saga?.ExecutionFailureReason,
+                failureReason,
+                paymentEvents.Select(MapPaymentEvent).ToArray()
+            );
+        }
+        catch
         {
             return null;
         }
-
-        var saga = await _ordersDb.OrderSagaStates
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.OrderId == req.OrderId, ct);
-
-        var paymentEvents = await _paymentsDb.PaymentEventRecords
-            .AsNoTracking()
-            .Where(x => x.OrderId == req.OrderId)
-            .OrderBy(x => x.SequenceNumber)
-            .ToListAsync(ct);
-
-        var failureReason = paymentEvents
-            .Where(x => string.Equals(x.EventType, nameof(PaymentFailedMessage), StringComparison.Ordinal))
-            .Select(x => TryGetFailureReason(x.Data))
-            .LastOrDefault(x => !string.IsNullOrWhiteSpace(x));
-
-        var paymentState = ResolvePaymentState(order.Status, saga?.State, paymentEvents);
-        var currentAttemptNumber = paymentEvents
-            .OrderByDescending(x => x.AttemptNumber)
-            .Select(x => x.AttemptNumber)
-            .FirstOrDefault();
-
-        return new OrderPaymentDetailsDto(
-            order.Id,
-            saga?.PaymentId ?? paymentEvents.LastOrDefault()?.PaymentId,
-            currentAttemptNumber,
-            order.Status,
-            saga?.State ?? OrderSagaStates.PaymentPending,
-            paymentState,
-            order.CreatedAtUtc,
-            saga?.LastPaymentRequestedAtUtc,
-            saga?.LastPaymentCompletedAtUtc,
-            saga?.ExecutionDispatchedAtUtc,
-            saga?.ExecutionStartedAtUtc,
-            saga?.ExecutionCompletedAtUtc,
-            saga?.ExecutionFailedAtUtc,
-            saga?.ExecutionFailureReason,
-            failureReason,
-            paymentEvents.Select(MapPaymentEvent).ToArray()
-        );
     }
 
     private static OrderPaymentEventDto MapPaymentEvent(PaymentEventRecord record)

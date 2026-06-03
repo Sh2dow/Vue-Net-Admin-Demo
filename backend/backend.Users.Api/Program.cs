@@ -21,7 +21,6 @@ builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(backe
 
 // Configure database connections - use dedicated connection strings per service
 var authDbConnectionString = builder.Configuration.GetConnectionString("Auth");
-var ordersDbConnectionString = builder.Configuration.GetConnectionString("Orders");
 
 if (string.IsNullOrWhiteSpace(authDbConnectionString))
 {
@@ -32,13 +31,6 @@ if (string.IsNullOrWhiteSpace(authDbConnectionString))
 builder.Services.AddDbContext<AuthDbContext>(options =>
     options.UseNpgsql(authDbConnectionString)
         .UseSnakeCaseNamingConvention());
-
-if (!string.IsNullOrWhiteSpace(ordersDbConnectionString))
-{
-    builder.Services.AddDbContext<OrdersDbContext>(options =>
-        options.UseNpgsql(ordersDbConnectionString)
-            .UseSnakeCaseNamingConvention());
-}
 
 builder.Services.AddScoped<IUserDirectory, EfUserDirectory>();
 
@@ -54,6 +46,21 @@ if (builder.Configuration.GetValue<bool>("RabbitMq:Enabled", true))
 }
 
 var app = builder.Build();
+
+// Ensure Auth database schema exists at startup (Orders DB is owned by Orders.Api)
+using (var scope = app.Services.CreateScope())
+{
+    var logger = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Program>>();
+    try
+    {
+        await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.EnsureCreatedAsync();
+        logger.LogInformation("AuthDbContext schema ensured.");
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "AuthDbContext EnsureCreated failed (schema may differ from model).");
+    }
+}
 
 app.UseExceptionHandler();
 app.UseSwagger();

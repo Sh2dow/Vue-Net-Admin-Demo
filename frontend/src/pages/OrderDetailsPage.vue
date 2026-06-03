@@ -8,39 +8,51 @@ const router = useRouter();
 const workflow = ref<OrderWorkflow | null>(null);
 const loading = ref(false);
 const retrying = ref(false);
-let pollTimer: number | null = null;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
 const orderId = String(route.params.id);
 
 const stepIcon = (state: string) => {
     if (state === "Completed") return "mdi-check-circle";
     if (state === "Failed") return "mdi-alert-circle";
-    if (state === "In Progress") return "mdi-clock-outline";
+    if (state === "Pending") return "mdi-clock-outline";
     return "mdi-circle-slice-8";
 };
 
 const stepColor = (state: string) => {
     if (state === "Completed") return "success";
     if (state === "Failed") return "error";
-    if (state === "In Progress") return "warning";
+    if (state === "Pending") return "warning";
     return "grey";
 };
 
-async function fetchWorkflow() {
-    loading.value = true;
+function stopPolling() {
+    if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+    }
+}
+
+async function fetchWorkflow(isInitialFetch: boolean = false) {
+    if (isInitialFetch) {
+        loading.value = true;
+    }
     try {
         const res = await ordersApi.getWorkflow(orderId);
         workflow.value = res.data;
+        stopPolling();
 
-        // If PaymentPending, start polling
-        if (pollTimer) clearInterval(pollTimer);
-        if (res.data.steps?.some((s) => s.stepName === "Payment" && s.stepState === "In Progress")) {
-            pollTimer = window.setInterval(fetchWorkflow, 3000);
-        } else {
-            pollTimer = null;
+        // Only poll while payment is still pending
+        if (res.data.payment?.paymentState === "PaymentPending") {
+            pollTimer = setTimeout(fetchWorkflow, 3000);
         }
+    } catch (err) {
+        console.error("Failed to fetch order workflow:", err);
+        stopPolling();
     } finally {
-        loading.value = false;
+        if (isInitialFetch) {
+            loading.value = false;
+        }
     }
 }
 
@@ -48,17 +60,14 @@ async function retryPayment() {
     retrying.value = true;
     try {
         await ordersApi.retryPayment(orderId);
-        await fetchWorkflow();
+        await fetchWorkflow(false);
     } finally {
         retrying.value = false;
     }
 }
 
-onUnmounted(() => {
-    if (pollTimer) clearInterval(pollTimer);
-});
-
-onMounted(fetchWorkflow);
+onUnmounted(stopPolling);
+onMounted(() => fetchWorkflow(true));
 </script>
 
 <template>
@@ -75,41 +84,41 @@ onMounted(fetchWorkflow);
                     Order Workflow Details
                 </template>
                 <template v-if="workflow" #subtitle>
-                    <div>Order Type: {{ workflow.orderType }}</div>
-                    <div>Total: ${{ Number(workflow.totalAmount).toFixed(2) }}</div>
+                    <div>Order Type: {{ workflow.order.orderType }}</div>
+                    <div>Total: ${{ Number(workflow.order.totalAmount).toFixed(2) }}</div>
+                    <div>Status: <strong>{{ workflow.order.status }}</strong></div>
                 </template>
             </v-card-item>
         </v-card>
 
         <!-- Timeline -->
-        <v-card v-if="workflow?.steps && !loading" variant="outlined">
+        <v-card v-if="workflow?.timeline && !loading" variant="outlined">
             <v-card-item>
                 <v-card-title class="text-subtitle-1 font-weight-bold">Saga Timeline</v-card-title>
                 <v-timeline side="end">
                     <v-timeline-item
-                        v-for="step in workflow.steps"
-                        :key="step.stepName"
-                        :dot-color="stepColor(step.stepState)"
+                        v-for="step in workflow.timeline"
+                        :key="step.key"
+                        :dot-color="stepColor(step.state)"
                         size="small"
                         filled-dot
                     >
-                        <v-card variant="tonal" :color="stepColor(step.stepState)">
+                        <v-card variant="tonal" :color="stepColor(step.state)">
                             <v-card-item>
-                                <v-icon :icon="stepIcon(step.stepState)" :color="stepColor(step.stepState)" start />
+                                <v-icon :icon="stepIcon(step.state)" :color="stepColor(step.state)" start />
                                 <div>
-                                    <div class="font-weight-bold">{{ step.stepName }}</div>
+                                    <div class="font-weight-bold">{{ step.label }}</div>
                                     <div class="text-body-2 text-medium-emphasis">
-                                        {{ step.stepState }}
-                                        <span v-if="step.error"> — {{ step.error }}</span>
+                                        {{ step.description }}
+                                        <span v-if="step.occurredAtUtc"> — {{ new Date(step.occurredAtUtc).toLocaleString() }}</span>
                                     </div>
                                 </div>
-                                <v-chip :color="stepColor(step.stepState)" variant="tonal" size="small" class="ml-auto">
-                                    {{ step.stepState }}
+                                <v-chip :color="stepColor(step.state)" variant="tonal" size="small" class="ml-auto">
+                                    {{ step.state }}
                                 </v-chip>
                             </v-card-item>
-                            <v-card-actions>
+                            <v-card-actions v-if="step.key === 'payment-failed' && step.state === 'Completed'">
                                 <v-btn
-                                    v-if="step.stepName === 'Payment' && step.stepState === 'Failed'"
                                     color="error"
                                     size="x-small"
                                     :loading="retrying"

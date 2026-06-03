@@ -9,7 +9,7 @@ public sealed class OrdersDbContextFactory : IDesignTimeDbContextFactory<OrdersD
 {
     public OrdersDbContext CreateDbContext(string[] args)
     {
-        var envConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Default");
+        var envConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Orders");
         if (!string.IsNullOrWhiteSpace(envConnectionString))
         {
             return CreateDbContext(envConnectionString);
@@ -24,11 +24,11 @@ public sealed class OrdersDbContextFactory : IDesignTimeDbContextFactory<OrdersD
             .AddEnvironmentVariables()
             .Build();
 
-        var connectionString = configuration.GetConnectionString("Default");
+        var connectionString = configuration.GetConnectionString("Orders");
         if (string.IsNullOrWhiteSpace(connectionString))
         {
             throw new InvalidOperationException(
-                $"Connection string 'Default' was not found. Configuration base path: '{basePath}'.");
+                $"Connection string 'Orders' was not found. Configuration base path: '{basePath}'.");
         }
 
         return CreateDbContext(connectionString);

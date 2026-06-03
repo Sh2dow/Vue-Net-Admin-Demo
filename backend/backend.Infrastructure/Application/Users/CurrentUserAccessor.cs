@@ -13,8 +13,9 @@ public sealed class CurrentUserAccessor : ICurrentUserAccessor
     }
 
     public string? Subject =>
-        _httpContextAccessor.HttpContext?.User.Identity?.Name
-        ?? _httpContextAccessor.HttpContext?.User.FindFirstValue("sub");
+        _httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        ?? _httpContextAccessor.HttpContext?.User.FindFirstValue("sub")
+        ?? _httpContextAccessor.HttpContext?.User.Identity?.Name;
 
     public string? PreferredUsername =>
         _httpContextAccessor.HttpContext?.User.FindFirstValue("preferred_username");

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using OpenIddict.Abstractions;
 using System.Security.Claims;
 using System.Web;
 
@@ -36,8 +37,10 @@ public class AuthorizationController : ControllerBase
         }
 
         var identity = new ClaimsIdentity(CookieAuthenticationDefaults.AuthenticationScheme);
-        identity.AddClaim(new Claim(ClaimTypes.Name, "admin"));          // required by OpenIddict as subject
-        identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, "1"));
+        identity.AddClaim(new Claim(ClaimTypes.Name, "admin"));
+        identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, "admin"));
+        identity.AddClaim(new Claim(OpenIddictConstants.Claims.PreferredUsername, "admin"));
+        identity.AddClaim(new Claim(OpenIddictConstants.Claims.Email, "admin@localhost"));
         identity.AddClaim(new Claim(ClaimTypes.Role, "admin"));
 
         await HttpContext.SignInAsync(

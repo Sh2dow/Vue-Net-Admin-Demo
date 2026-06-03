@@ -8,7 +8,7 @@ const route = useRoute();
 const orders = ref<OrderItem[]>([]);
 const loading = ref(false);
 
-const orderType = ref<"product" | "subscription" | "coupon">("product");
+const orderType = ref<"digital" | "physical">("digital");
 const totalAmount = ref(100);
 const paymentMethod = ref<"credit_card" | "paypal">("credit_card");
 const creating = ref(false);
@@ -36,7 +36,7 @@ async function createOrder() {
     creating.value = true;
     try {
         await ordersApi.create({ orderType: orderType.value, totalAmount: totalAmount.value, paymentMethod: paymentMethod.value }, asUserId.value ?? undefined);
-        orderType.value = "product";
+        orderType.value = "digital";
         totalAmount.value = 100;
         paymentMethod.value = "credit_card";
         await fetchOrders();
@@ -81,9 +81,8 @@ onMounted(fetchOrders);
                         v-model="orderType"
                         label="Order Type"
                         :items="[
-                            { title: 'Product', value: 'product' },
-                            { title: 'Subscription', value: 'subscription' },
-                            { title: 'Coupon', value: 'coupon' },
+                            { title: 'Digital', value: 'digital' },
+                            { title: 'Physical', value: 'physical' },
                         ]"
                         variant="outlined"
                         density="compact"

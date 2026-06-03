@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REGION="${AWS_REGION:-eu-central-1}"
-APP_NAME="${APP_NAME:-keycloak-demo}"
+APP_NAME="${APP_NAME:-vue-demo}"
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 PARAM_PATH="${PARAM_PATH:-/$APP_NAME/$ENVIRONMENT}"
 DB_ID="${DB_ID:-$APP_NAME}"
@@ -102,11 +102,11 @@ try_write_env_from_ssm() {
       | @tsv
     ' | while IFS=$'\t' read -r name value; do
       case "$name" in
-        "$path/rds/keycloak-username")
-          printf 'KEYCLOAK_DB_USERNAME=%s\n' "$value" >> "$GENERATED_ENV_PATH"
+        "$path/rds/vue-username")
+          printf 'VUE_DB_USERNAME=%s\n' "$value" >> "$GENERATED_ENV_PATH"
           ;;
-        "$path/rds/keycloak-password")
-          printf 'KEYCLOAK_DB_PASSWORD=%s\n' "$value" >> "$GENERATED_ENV_PATH"
+        "$path/rds/vue-password")
+          printf 'VUE_DB_PASSWORD=%s\n' "$value" >> "$GENERATED_ENV_PATH"
           ;;
         "$path/rds/auth-username")
           printf 'AUTH_DB_USERNAME=%s\n' "$value" >> "$GENERATED_ENV_PATH"
@@ -126,8 +126,8 @@ try_write_env_from_ssm() {
         "$path/rds/master-password")
           printf 'RDS_MASTER_PASSWORD=%s\n' "$value" >> "$GENERATED_ENV_PATH"
           ;;
-        "$path/rds/db-name-keycloak")
-          printf 'RDS_KEYCLOAK_DB=%s\n' "$value" >> "$GENERATED_ENV_PATH"
+        "$path/rds/db-name-vue")
+          printf 'RDS_VUE_DB=%s\n' "$value" >> "$GENERATED_ENV_PATH"
           ;;
         "$path/rds/db-name-auth")
           printf 'RDS_AUTH_DB=%s\n' "$value" >> "$GENERATED_ENV_PATH"
@@ -135,8 +135,8 @@ try_write_env_from_ssm() {
         "$path/rds/db-name-app")
           printf 'RDS_APP_DB=%s\n' "$value" >> "$GENERATED_ENV_PATH"
           ;;
-        "$path/keycloak/admin-password")
-          printf 'KEYCLOAK_ADMIN_PASSWORD=%s\n' "$value" >> "$GENERATED_ENV_PATH"
+        "$path/vue/admin-password")
+          printf 'VUE_ADMIN_PASSWORD=%s\n' "$value" >> "$GENERATED_ENV_PATH"
           ;;
       esac
     done
@@ -204,30 +204,30 @@ build_database_urls() {
   . "$GENERATED_ENV_PATH"
   set -u
 
-  : "${KEYCLOAK_DB_USERNAME:?Missing KEYCLOAK_DB_USERNAME}"
-  : "${KEYCLOAK_DB_PASSWORD:?Missing KEYCLOAK_DB_PASSWORD}"
+  : "${VUE_DB_USERNAME:?Missing VUE_DB_USERNAME}"
+  : "${VUE_DB_PASSWORD:?Missing VUE_DB_PASSWORD}"
   : "${AUTH_DB_USERNAME:?Missing AUTH_DB_USERNAME}"
   : "${AUTH_DB_PASSWORD:?Missing AUTH_DB_PASSWORD}"
   : "${APP_DB_USERNAME:?Missing APP_DB_USERNAME}"
   : "${APP_DB_PASSWORD:?Missing APP_DB_PASSWORD}"
-  : "${RDS_KEYCLOAK_DB:?Missing RDS_KEYCLOAK_DB}"
+  : "${RDS_VUE_DB:?Missing RDS_VUE_DB}"
   : "${RDS_AUTH_DB:?Missing RDS_AUTH_DB}"
   : "${RDS_ENDPOINT:?Missing RDS_ENDPOINT}"
 
   local port="${RDS_PORT:-5432}"
-  local app_db="${RDS_APP_DB:-keycloak_demo_app}"
-  local tasks_db="${RDS_TASKS_DB:-${TASKS_DB_NAME:-keycloak_demo_tasks}}"
-  local orders_db="${RDS_ORDERS_DB:-${ORDERS_DB_NAME:-keycloak_demo_orders}}"
-  local payments_db="${RDS_PAYMENTS_DB:-${PAYMENTS_DB_NAME:-keycloak_demo_payments}}"
+  local app_db="${RDS_APP_DB:-vue_demo_app}"
+  local tasks_db="${RDS_TASKS_DB:-${TASKS_DB_NAME:-vue_demo_tasks}}"
+  local orders_db="${RDS_ORDERS_DB:-${ORDERS_DB_NAME:-vue_demo_orders}}"
+  local payments_db="${RDS_PAYMENTS_DB:-${PAYMENTS_DB_NAME:-vue_demo_payments}}"
 
-  append_or_replace_env "KEYCLOAK_DB_URL" "postgresql://${KEYCLOAK_DB_USERNAME}:${KEYCLOAK_DB_PASSWORD}@${RDS_ENDPOINT}:${port}/${RDS_KEYCLOAK_DB}?sslmode=require"
+  append_or_replace_env "VUE_DB_URL" "postgresql://${VUE_DB_USERNAME}:${VUE_DB_PASSWORD}@${RDS_ENDPOINT}:${port}/${RDS_VUE_DB}?sslmode=require"
   append_or_replace_env "AUTH_DB_URL" "postgresql://${AUTH_DB_USERNAME}:${AUTH_DB_PASSWORD}@${RDS_ENDPOINT}:${port}/${RDS_AUTH_DB}?sslmode=require"
   append_or_replace_env "APP_DB_URL" "postgresql://${APP_DB_USERNAME}:${APP_DB_PASSWORD}@${RDS_ENDPOINT}:${port}/${app_db}?sslmode=require"
   append_or_replace_env "DB_HOST" "$RDS_ENDPOINT"
   append_or_replace_env "DB_PORT" "$port"
   append_or_replace_env "RDS_USERNAME" "${RDS_MASTER_USERNAME:-}"
   append_or_replace_env "RDS_PASSWORD" "${RDS_MASTER_PASSWORD:-}"
-  append_or_replace_env "KEYCLOAK_DB_NAME" "$RDS_KEYCLOAK_DB"
+  append_or_replace_env "VUE_DB_NAME" "$RDS_VUE_DB"
   append_or_replace_env "AUTH_DB_NAME" "$RDS_AUTH_DB"
   append_or_replace_env "APP_DB_NAME" "$app_db"
   append_or_replace_env "RDS_TASKS_DB" "$tasks_db"
@@ -248,51 +248,51 @@ configure_public_urls() {
   local self_signed_https="${ENABLE_SELF_SIGNED_HTTPS:-true}"
   local public_host="${PUBLIC_HOST:-$(get_public_ip)}"
   local public_scheme="${PUBLIC_SCHEME:-http}"
-  local keycloak_hostname="${KEYCLOAK_PUBLIC_HOSTNAME:-}"
+  local vue_hostname="${VUE_PUBLIC_HOSTNAME:-}"
   local app_hostname="${APP_PUBLIC_HOSTNAME:-$public_host}"
   local api_hostname="${API_PUBLIC_HOSTNAME:-$public_host}"
-  local keycloak_scheme="${KEYCLOAK_PUBLIC_SCHEME:-$public_scheme}"
+  local vue_scheme="${VUE_PUBLIC_SCHEME:-$public_scheme}"
   local app_scheme="${APP_PUBLIC_SCHEME:-$public_scheme}"
   local api_scheme="${API_PUBLIC_SCHEME:-$public_scheme}"
-  local keycloak_url="${KEYCLOAK_PUBLIC_URL:-}"
-  local keycloak_realm_url="${KEYCLOAK_REALM_URL:-}"
-  local keycloak_client_url="http://${public_host}:8080"
-  local keycloak_proxy_headers="${KEYCLOAK_PROXY_HEADERS:-xforwarded}"
-  local keycloak_hostname_strict="${KEYCLOAK_HOSTNAME_STRICT:-false}"
+  local vue_url="${VUE_PUBLIC_URL:-}"
+  local vue_realm_url="${VUE_REALM_URL:-}"
+  local vue_client_url="http://${public_host}:8080"
+  local vue_proxy_headers="${VUE_PROXY_HEADERS:-xforwarded}"
+  local vue_hostname_strict="${VUE_HOSTNAME_STRICT:-false}"
   local app_public_url="${APP_PUBLIC_URL:-${app_scheme}://${app_hostname}}"
   local api_public_url="${API_PUBLIC_URL:-${api_scheme}://${api_hostname}}"
 
   if [ "$self_signed_https" = "true" ] && [ -z "${PUBLIC_SCHEME:-}" ]; then
     public_scheme="https"
-    keycloak_scheme="${KEYCLOAK_PUBLIC_SCHEME:-https}"
+    vue_scheme="${VUE_PUBLIC_SCHEME:-https}"
     app_scheme="${APP_PUBLIC_SCHEME:-https}"
     api_scheme="${API_PUBLIC_SCHEME:-https}"
     app_public_url="${APP_PUBLIC_URL:-${app_scheme}://${app_hostname}}"
     api_public_url="${API_PUBLIC_URL:-${api_scheme}://${api_hostname}}"
   fi
 
-  if [ "$self_signed_https" = "true" ] && [ -z "$keycloak_hostname" ]; then
-    keycloak_hostname="$public_host"
+  if [ "$self_signed_https" = "true" ] && [ -z "$vue_hostname" ]; then
+    vue_hostname="$public_host"
   fi
 
-  if [ -n "$keycloak_hostname" ] && [ -z "$keycloak_url" ]; then
-    keycloak_url="${keycloak_scheme}://${keycloak_hostname}"
+  if [ -n "$vue_hostname" ] && [ -z "$vue_url" ]; then
+    vue_url="${vue_scheme}://${vue_hostname}"
   fi
 
-  if [ -n "$keycloak_url" ] && [ -z "$keycloak_realm_url" ]; then
-    keycloak_realm_url="${keycloak_url}/realms/myrealm"
-  elif [ -z "$keycloak_realm_url" ]; then
-    keycloak_realm_url="${keycloak_client_url}/realms/myrealm"
+  if [ -n "$vue_url" ] && [ -z "$vue_realm_url" ]; then
+    vue_realm_url="${vue_url}/realms/myrealm"
+  elif [ -z "$vue_realm_url" ]; then
+    vue_realm_url="${vue_client_url}/realms/myrealm"
   fi
 
   append_or_replace_env "PUBLIC_HOST" "$public_host"
   append_or_replace_env "PUBLIC_SCHEME" "$public_scheme"
-  append_or_replace_env "KEYCLOAK_PUBLIC_HOSTNAME" "$keycloak_hostname"
-  append_or_replace_env "KEYCLOAK_PUBLIC_SCHEME" "$keycloak_scheme"
-  append_or_replace_env "KEYCLOAK_PUBLIC_URL" "$keycloak_url"
-  append_or_replace_env "KEYCLOAK_REALM_URL" "$keycloak_realm_url"
-  append_or_replace_env "KEYCLOAK_PROXY_HEADERS" "$keycloak_proxy_headers"
-  append_or_replace_env "KEYCLOAK_HOSTNAME_STRICT" "$keycloak_hostname_strict"
+  append_or_replace_env "VUE_PUBLIC_HOSTNAME" "$vue_hostname"
+  append_or_replace_env "VUE_PUBLIC_SCHEME" "$vue_scheme"
+  append_or_replace_env "VUE_PUBLIC_URL" "$vue_url"
+  append_or_replace_env "VUE_REALM_URL" "$vue_realm_url"
+  append_or_replace_env "VUE_PROXY_HEADERS" "$vue_proxy_headers"
+  append_or_replace_env "VUE_HOSTNAME_STRICT" "$vue_hostname_strict"
   append_or_replace_env "ENABLE_SELF_SIGNED_HTTPS" "$self_signed_https"
   append_or_replace_env "APP_PUBLIC_HOSTNAME" "$app_hostname"
   append_or_replace_env "APP_PUBLIC_SCHEME" "$app_scheme"
@@ -346,7 +346,7 @@ main() {
     append_or_replace_env "ENVIRONMENT" "$ENVIRONMENT"
     append_or_replace_env "RDS_ENDPOINT" "$endpoint"
     append_or_replace_env "RDS_PORT" "${RDS_PORT:-5432}"
-    append_or_replace_env "KEYCLOAK_START_COMMAND" "${KEYCLOAK_START_COMMAND:-start}"
+    append_or_replace_env "VUE_START_COMMAND" "${VUE_START_COMMAND:-start}"
 
     build_database_urls
     configure_public_urls
@@ -369,15 +369,15 @@ main() {
     -u RDS_ENDPOINT \
     -u RDS_USERNAME \
     -u RDS_PASSWORD \
-    -u RDS_KEYCLOAK_DB \
+    -u RDS_VUE_DB \
     -u RDS_AUTH_DB \
     -u RDS_APP_DB \
     -u RDS_TASKS_DB \
     -u RDS_ORDERS_DB \
     -u RDS_PAYMENTS_DB \
-    -u KEYCLOAK_ADMIN_PASSWORD \
-    -u KEYCLOAK_DB_USERNAME \
-    -u KEYCLOAK_DB_PASSWORD \
+    -u VUE_ADMIN_PASSWORD \
+    -u VUE_DB_USERNAME \
+    -u VUE_DB_PASSWORD \
     -u AUTH_DB_USERNAME \
     -u AUTH_DB_PASSWORD \
     -u APP_DB_USERNAME \
@@ -389,10 +389,10 @@ main() {
     -u PUBLIC_HOST \
     -u PUBLIC_SCHEME \
     -u ENABLE_SELF_SIGNED_HTTPS \
-    -u KEYCLOAK_PUBLIC_HOSTNAME \
-    -u KEYCLOAK_PUBLIC_SCHEME \
-    -u KEYCLOAK_PUBLIC_URL \
-    -u KEYCLOAK_REALM_URL \
+    -u VUE_PUBLIC_HOSTNAME \
+    -u VUE_PUBLIC_SCHEME \
+    -u VUE_PUBLIC_URL \
+    -u VUE_REALM_URL \
     -u APP_PUBLIC_HOSTNAME \
     -u APP_PUBLIC_SCHEME \
     -u APP_PUBLIC_URL \

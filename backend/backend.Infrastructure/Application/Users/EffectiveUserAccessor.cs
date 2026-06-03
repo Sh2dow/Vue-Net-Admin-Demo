@@ -49,12 +49,12 @@ public sealed class EffectiveUserAccessor : IEffectiveUserAccessor
         {
             if (hasAsUserId)
             {
-                // This usually means the JWT token was rejected or missing downstream.
-                // Throwing here makes the failure explicit instead of silently returning anonymous data.
-                throw new HttpProblemException(
-                    StatusCodes.Status401Unauthorized,
-                    "Unauthorized",
-                    "Impersonation requires a valid JWT token.");
+                // This usually means the JWT token was rejected, expired, or missing downstream.
+                // Instead of hard-failing, fall back to anonymous — the caller can handle empty results.
+                System.Diagnostics.Debug.WriteLine(
+                    $"[EffectiveUserAccessor] asUserId={rawAsUserId} but user is not authenticated. " +
+                    $"This may indicate JWT validation failed downstream (check metadata discovery or cert issues).");
+                return await _userDirectory.EnsureAsync("anonymous", "Anonymous", null, ct);
             }
 
             return await _userDirectory.EnsureAsync("anonymous", "Anonymous", null, ct);

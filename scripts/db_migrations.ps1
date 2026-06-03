@@ -1,18 +1,23 @@
 $ef = "$env:USERPROFILE\.dotnet\tools\dotnet-ef.exe"
 
-function Update-Db($context, $startupProject) {
-    & $ef database update `
-        --project backend.Domain\backend.Domain.csproj `
-        --startup-project $startupProject `
-        --context $context
+Set-Location $PSScriptRoot\..\backend\backend.Domain
+
+$contexts = @(
+    # @{ Name = "AppDbContext";     Db = "vue_demo" },
+    @{ Name = "AuthDbContext";     Db = "vue_demo_auth";	 Reportspath = "Migrations/AuthDb"},
+    @{ Name = "TasksDbContext";    Db = "vue_demo_tasks"; 	 Reportspath = "Migrations/TasksDb"},
+    @{ Name = "OrdersDbContext";   Db = "vue_demo_orders"; 	 Reportspath = "Migrations/OrdersDb"},
+    @{ Name = "PaymentsDbContext"; Db = "vue_demo_payments"; Reportspath =  "Migrations/PaymentsDb"}
+)
+
+foreach ($ctx in $contexts) {
+    Write-Host "`n--- Migrate $($ctx.Db) ($($ctx.Name)) ---" -ForegroundColor Cyan
+    & $ef database update --context $ctx.Name -- --reportspath $ctx.Reportspath
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "FAILED: $($ctx.Name) ($($ctx.Db))" -ForegroundColor Red
+    } else {
+        Write-Host "OK: $($ctx.Name) ($($ctx.Db))" -ForegroundColor Green
+    }
 }
 
-cd ..\backend
-
-Update-Db "AuthDbContext"     "backend.Auth.Api\backend.Auth.Api.csproj"
-Update-Db "TasksDbContext"    "backend.Tasks.Api\backend.Tasks.Api.csproj"
-Update-Db "OrdersDbContext"   "backend.Orders.Api\backend.Orders.Api.csproj"
-Update-Db "PaymentsDbContext" "backend.Payments.Api\backend.Payments.Api.csproj"
-Update-Db "AppDbContext"      "backend.Api\backend.Api.csproj"
-
-echo "All migrations applied successfully."
+echo "`nAll migrations applied."

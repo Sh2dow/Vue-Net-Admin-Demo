@@ -12,7 +12,7 @@ using backend.Domain.Data;
 namespace backend.Domain.Migrations.TasksDb
 {
     [DbContext(typeof(TasksDbContext))]
-    [Migration("20260602195746_Initial")]
+    [Migration("20260603162729_Initial")]
     partial class Initial
     {
         /// <inheritdoc />
@@ -20,7 +20,7 @@ namespace backend.Domain.Migrations.TasksDb
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.7")
+                .HasAnnotation("ProductVersion", "10.0.8")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);

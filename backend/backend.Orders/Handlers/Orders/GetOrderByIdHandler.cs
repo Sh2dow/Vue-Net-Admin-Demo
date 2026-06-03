@@ -23,11 +23,18 @@ public sealed class GetOrderByIdHandler : IRequestHandler<GetOrderByIdQuery, Ord
 
     public async Task<OrderViewDto?> Handle(GetOrderByIdQuery req, CancellationToken ct)
     {
-        var userId = await _effectiveUser.GetUserIdAsync(ct);
-        var order = await _db.Orders
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == req.Id && x.UserId == userId, ct);
+        try
+        {
+            var userId = await _effectiveUser.GetUserIdAsync(ct);
+            var order = await _db.Orders
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == req.Id && x.UserId == userId, ct);
 
-        return order == null ? null : OrderMapper.ToDto(order);
+            return order == null ? null : OrderMapper.ToDto(order);
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

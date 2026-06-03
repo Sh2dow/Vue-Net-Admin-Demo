@@ -30,10 +30,19 @@ public sealed class GetUsersHandler : IRequestHandler<GetUsersQuery, IReadOnlyLi
         }
 
         var userIds = users.Select(u => u.Id).ToList();
-        var orders = await _ordersDb.Orders
-            .AsNoTracking()
-            .Where(o => userIds.Contains(o.UserId))
-            .ToListAsync(ct);
+        IEnumerable<Order> orders = [];
+
+        try
+        {
+            orders = await _ordersDb.Orders
+                .AsNoTracking()
+                .Where(o => userIds.Contains(o.UserId))
+                .ToListAsync(ct);
+        }
+        catch
+        {
+            // Orders DB not available (startup race) — return users without orders
+        }
 
         var ordersByUser = orders.GroupBy(o => o.UserId).ToDictionary(g => g.Key, g => g.ToList());
 

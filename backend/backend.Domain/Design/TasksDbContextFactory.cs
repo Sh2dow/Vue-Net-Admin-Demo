@@ -9,7 +9,7 @@ public sealed class TasksDbContextFactory : IDesignTimeDbContextFactory<TasksDbC
 {
     public TasksDbContext CreateDbContext(string[] args)
     {
-        var envConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Default");
+        var envConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Tasks");
         if (!string.IsNullOrWhiteSpace(envConnectionString))
         {
             return CreateDbContext(envConnectionString);
@@ -24,11 +24,11 @@ public sealed class TasksDbContextFactory : IDesignTimeDbContextFactory<TasksDbC
             .AddEnvironmentVariables()
             .Build();
 
-        var connectionString = configuration.GetConnectionString("Default");
+        var connectionString = configuration.GetConnectionString("Tasks");
         if (string.IsNullOrWhiteSpace(connectionString))
         {
             throw new InvalidOperationException(
-                $"Connection string 'Default' was not found. Configuration base path: '{basePath}'.");
+                $"Connection string 'Tasks' was not found. Configuration base path: '{basePath}'.");
         }
 
         return CreateDbContext(connectionString);

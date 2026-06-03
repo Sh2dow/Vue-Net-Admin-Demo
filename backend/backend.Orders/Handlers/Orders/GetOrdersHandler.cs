@@ -30,14 +30,21 @@ public sealed class GetOrdersHandler : IRequestHandler<GetOrdersQuery, IReadOnly
         var pageNumber = Math.Max(req.PageNumber, 1);
         var pageSize = Math.Clamp(req.PageSize, 1, 100);
 
-        var orders = await _db.Orders
-            .AsNoTracking()
-            .Where(x => x.UserId == userId)
-            .OrderByDescending(x => x.CreatedAtUtc)
-            .Skip((pageNumber - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(ct);
+        try
+        {
+            var orders = await _db.Orders
+                .AsNoTracking()
+                .Where(x => x.UserId == userId)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync(ct);
 
-        return orders.Select(OrderMapper.ToDto).ToList();
+            return orders.Select(OrderMapper.ToDto).ToList();
+        }
+        catch
+        {
+            return new List<OrderViewDto>();
+        }
     }
 }

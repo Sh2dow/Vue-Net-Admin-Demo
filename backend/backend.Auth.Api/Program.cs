@@ -76,7 +76,9 @@ builder.Services.AddOpenIddict()
             .AddDevelopmentSigningCertificate();
 
         // Passthrough: lets our MapMethods endpoint handle /connect/authorize
-        server.UseAspNetCore().EnableAuthorizationEndpointPassthrough();
+        server.UseAspNetCore()
+            .EnableAuthorizationEndpointPassthrough()
+            .EnableEndSessionEndpointPassthrough();
     });
 
 // Authentication: Cookie for session
@@ -163,11 +165,11 @@ app.MapMethods("connect/authorize", [HttpMethods.Get, HttpMethods.Post], async (
             ?? Guid.NewGuid().ToString("N")));
         identity.AddClaim(new Claim(Claims.Name, context.User.Identity?.Name ?? "admin"));
 
-        // Copy remaining claims (roles, email, etc.)
+        // Copy remaining claims (roles, email, etc.) — skip claims already explicitly added
         foreach (var claim in context.User.Claims)
         {
-            // Skip claims already added
-            if (claim.Type == ClaimTypes.NameIdentifier || claim.Type == ClaimTypes.Name)
+            if (claim.Type == ClaimTypes.NameIdentifier || claim.Type == ClaimTypes.Name ||
+                claim.Type == Claims.Subject || claim.Type == Claims.Name)
                 continue;
             identity.AddClaim(new Claim(claim.Type, claim.Value));
         }
@@ -176,10 +178,11 @@ app.MapMethods("connect/authorize", [HttpMethods.Get, HttpMethods.Post], async (
         identity.SetScopes(request.GetScopes());
         identity.SetResources(await scopeManager.ListResourcesAsync(identity.GetScopes()).ToListAsync());
 
-        // Allow all claims in access tokens
+        // Allow claims in access tokens; roles, preferred_username, email also in identity token
         identity.SetDestinations(claim => claim.Type switch
         {
-            Claims.Role => [Destinations.AccessToken, Destinations.IdentityToken],
+            Claims.Role or Claims.PreferredUsername or Claims.Email or ClaimTypes.Role =>
+                [Destinations.AccessToken, Destinations.IdentityToken],
             _ => [Destinations.AccessToken]
         });
 
@@ -190,11 +193,12 @@ app.MapMethods("connect/authorize", [HttpMethods.Get, HttpMethods.Post], async (
     }
 
     // 4. Not authenticated — challenge to trigger redirect to /login
+    // QueryString already includes the leading '?', so no extra '?' before it
     return Results.Challenge(
         authenticationSchemes: [CookieAuthenticationDefaults.AuthenticationScheme],
         properties: new AuthenticationProperties
         {
-            RedirectUri = $"/connect/authorize?{context.Request.QueryString}"
+            RedirectUri = $"/connect/authorize{context.Request.QueryString}"
         });
 });
 
@@ -205,6 +209,20 @@ app.MapGet("/login", (string? returnUrl) =>
         ? returnUrl
         : "/connect/authorize";
     return Results.Text(BuildLoginForm(target), "text/html");
+});
+
+// Logout endpoint — clears cookie and redirects to frontend
+app.MapMethods("connect/logout", [HttpMethods.Get, HttpMethods.Post], (HttpContext context) =>
+{
+    var postLogoutUri = context.Request.Query["post_logout_redirect_uri"].FirstOrDefault()
+        ?? "http://localhost:5173/login";
+
+    return Results.SignOut(
+        authenticationSchemes: [CookieAuthenticationDefaults.AuthenticationScheme],
+        properties: new AuthenticationProperties
+        {
+            RedirectUri = postLogoutUri
+        });
 });
 
 // Health endpoint
