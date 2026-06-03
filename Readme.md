@@ -292,7 +292,7 @@ bun run build   # Production build
 bun run dev     # Development server (port 5173)
 ```
 
-### AWS Deployment
+### AWS Deployment (Legacy)
 
 Run `scripts/deploy.sh` locally (uses AWS credentials):
 - Creates/updates IAM role policies
@@ -301,6 +301,213 @@ Run `scripts/deploy.sh` locally (uses AWS credentials):
 - Starts the Docker Compose stack on EC2, including frontend, gateway, RabbitMQ, and the backend microservices
 
 The `backend.AppHost` `aws` launch profile is not a deployment mechanism. It only starts the AppHost locally with AWS-oriented configuration.
+
+---
+
+## Azure Deployment (Cloud-Native)
+
+### Architecture
+
+```
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                              Azure Portal                                     │
+│                                                                               │
+│  ┌───────────────────┐                                                        │
+│  │  Azure Static     │                                                        │
+│  │  Web Apps         │  (Free tier, SPA hosting + CDN)                        │
+│  │  (Vue Frontend)   │                                                        │
+│  └────────┬──────────┘                                                        │
+│           │ HTTPS                                                             │
+│           ▼                                                                   │
+│  ┌────────────────────────────────────────────────────────────┐               │
+│  │        Azure Container Apps Environment (Consumption)      │               │
+│  │                                                            │               │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │               │
+│  │  │ API      │→ │ Auth     │  │ Tasks    │  │ Orders   │    │               │
+│  │  │ Gateway  │  │ Api      │  │ Api      │  │ Api      │    │               │
+│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │               │
+│  │  ┌──────────┐  ┌──────────┐                                │               │
+│  │  │ Users    │  │ Payments │                                │               │
+│  │  │ Api      │  │ Api      │                                │               │
+│  │  └──────────┘  └──────────┘                                │               │
+│  └──────────────┬──────────────────────┬──────────────────────┘               │
+│                 │                      │                                      │
+│                 ▼                      ▼                                      │
+│  ┌──────────────────────────┐ ┌────────────────────────────┐                  │
+│  │ Azure PostgreSQL         │ │ Azure Service Bus          │                  │
+│  │ (Flexible Server)        │ │ (Premium, replaces         │                  │
+│  │                          │ │  RabbitMQ)                 │                  │
+│  │ • vue_demo_auth          │ │ • payments.stub.requests   │                  │
+│  │ • vue_demo_tasks         │ │ • orders.saga              │                  │
+│  │ • vue_demo_orders        │ │ • orders.execution.dispatch│                  │
+│  │ • vue_demo_payments      │ │ • DLX queue                │                  │
+│  └──────────────────────────┘ └────────────────────────────┘                  │
+│                                                                               │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐               │
+│  │ ACR              │ │ Key Vault        │ │ GitHub Actions   │               │
+│  │ (7 container     │ │ (connection      │ │ (CI/CD pipelines)│               │
+│  │  images)         │ │ strings, secrets)│ │                  │               │
+│  └──────────────────┘ └──────────────────┘ └──────────────────┘               │
+└───────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Service Mapping
+
+| Local | Azure Service | Notes |
+|-------|---------------|-------|
+| 6 .NET microservices | **Azure Container Apps** | Serverless containers, scale-to-zero, Consumption tier |
+| API Gateway | **Azure Container Apps** | Same environment, internal ingress |
+| PostgreSQL ×4 | **Azure Database for PostgreSQL (Flexible)** | 4 logical DBs on 1 server, Burstable B1ms |
+| RabbitMQ | **Azure Service Bus (Premium)** | Queues, ordered processing, 3 ACUs |
+| Vue SPA | **Azure Static Web Apps (Free)** | 10GB storage, global CDN |
+| Docker images | **Azure Container Registry (Basic)** | Private registry, ACR tasks for build |
+| Secrets/Keys | **Azure Key Vault (Standard)** | Connection strings, OpenIddict signing key |
+| `.env` / appsettings | **Container Apps Environment Variables** | Injected at deploy time, Key Vault references |
+| `docker compose` | **Bicep (IaC)** | Declarative, version-controlled infrastructure |
+| Manual deploys | **GitHub Actions** | Build → push → deploy on `git push` |
+
+### Infrastructure as Code (Bicep)
+
+Bicep is Azure's native DSL for infrastructure. No provider config needed.
+
+```bicep
+// infra/main.bicep - simplified example
+param location string = 'eastus'
+param environment string = 'dev'
+
+// Resource Group
+resource rg 'Microsoft.Resources/resourceGroups@2021-01-01' = {
+  name: '${environment}-vue-admin-rg'
+  location: location
+}
+
+// Container Registry
+resource acr 'Microsoft.ContainerRegistry/registries@2023-01-01-preview' = {
+  name: 'vueadmin${environment}acr'
+  location: location
+  sku: { name: 'Basic' }
+}
+
+// PostgreSQL Flexible Server
+resource pgServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-07-01-preview' = {
+  name: 'vueadmin-${environment}-pg'
+  location: location
+  sku: { name: 'B1ms' tier: 'Burstable' }
+  properties: {
+    version: '16'
+    administratorLogin: 'vueadmin'
+    administratorLoginPassword: pgPassword.value // from Key Vault
+    highAvailability: { mode: 'Disabled' } // save cost for dev
+  }
+}
+
+// Container Apps Environment
+resource caEnv 'Microsoft.App/managedEnvironments@2024-02-01' = {
+  name: '${environment}-vue-admin-env'
+  location: location
+}
+
+// Container Apps (one per service)
+resource authApp 'Microsoft.App/jobs@2024-02-01' = {
+  name: 'auth-api'
+  location: location
+  properties: {
+    configuration: {
+      managedEnvironmentId: caEnv.id
+      secrets: [
+        { name: 'db-password' value: listSecret(pgServer.id, '2023-07-01-preview').password }
+      ]
+    }
+    template: {
+      containers: [{
+        name: 'auth-api'
+        image: '${acr.loginServer}/auth-api:latest'
+        env: [
+          { name: 'ConnectionStrings__Auth' valueFormat: 'secret' value: 'db-conn' }
+          { name: 'ASPNETCORE_ENVIRONMENT' value: 'Production' }
+        ]
+      }]
+      scale: { minReplicas: 1 }
+    }
+  }
+}
+```
+
+### Deployment Workflow
+
+```mermaid
+graph LR
+    A[git push main] --> B[GitHub Actions]
+    B --> C[Build .NET services]
+    B --> D[Build Vue frontend]
+    C --> E[Push to ACR]
+    D --> F[Deploy to Static Web Apps]
+    E --> G[Deploy Container Apps]
+    G --> H[Run migrations]
+    H --> I[Health checks]
+```
+
+### Cost Estimate (Dev Environment)
+
+| Service | Tier | Cost/hr | Monthly |
+|---------|------|---------|---------|
+| Container Apps ×7 | Consumption | $0.70 | ~$500 |
+| PostgreSQL | Burstable B1ms | $0.10 | ~$72 |
+| Service Bus | Premium 3 ACU | $0.05 | ~$36 |
+| ACR | Basic | $0.05 | ~$36 |
+| Static Web Apps | Free | $0 | **Free** |
+| Key Vault | Standard | — | $1 |
+| **Total** | | **~$0.90/hr** | **~$645/mo** |
+
+> **⚠️ Critical:** Delete the resource group when not in use!
+> `az group delete --name dev-vue-admin-rg --yes --no-wait`
+
+### Quick Start (Azure)
+
+```powershell
+# 1. Install Azure CLI
+winget install Microsoft.AzureCLI
+
+# 2. Login (free trial)
+az login
+az account set --subscription "Free Trial"
+
+# 3. Create resource group
+az group create --name dev-vue-admin-rg --location eastus
+
+# 4. Deploy infrastructure with Bicep
+az deployment group create `
+  --resource-group dev-vue-admin-rg `
+  --template-file infra/main.bicep
+
+# 5. Build and push images
+docker build -t vueadminder vacr.azurecr.io/auth-api:latest -f backend/backend.Auth.Api/Dockerfile .
+docker push vueadminder vacr.azurecr.io/auth-api:latest
+
+# 6. Deploy containers (Bicep handles this)
+# 7. Verify
+curl https://dev-vue-admin-env.azurewebsites.net/api/health
+```
+
+### Code Changes Required for Azure
+
+1. **Service Bus instead of RabbitMQ** — Replace `IConnection` with `ServiceBusClient`, keep queue names identical
+2. **Environment variables** — Already supported, just map to Container Apps env vars
+3. **HTTPS endpoints** — Container Apps provides managed domains, update `VITE_AUTHORITY`
+4. **Connection strings** — PostgreSQL flexible server uses SSL by default, add `SslMode=Require`
+
+### Phase Plan
+
+| Phase | What | Duration |
+|-------|------|----------|
+| 1 | Bicep IaC: ACR, PostgreSQL, Container Apps, Key Vault | 1-2 days |
+| 2 | Build + push all 7 Docker images to ACR | 1 day |
+| 3 | Deploy containers to Container Apps with config | 1-2 days |
+| 4 | Deploy frontend to Static Web Apps | 1 day |
+| 5 | Replace RabbitMQ with Azure Service Bus in code | 1-2 days |
+| 6 | GitHub Actions CI/CD pipeline | 1 day |
+| 7 | Key Vault secrets + managed identity | 1 day |
+| 8 | End-to-end verification | 1 day |
 
 ---
 

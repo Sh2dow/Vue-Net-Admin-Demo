@@ -26,18 +26,26 @@ public sealed class SeedData : IHostedService
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Resolve scoped services inside a scope
-        using var scope = _serviceProvider.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-        var appManager = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
+        try
+        {
+            // Resolve scoped services inside a scope
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            var appManager = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
 
-        // Apply pending migrations before seeding (idempotent — no-op if already applied)
-        _logger.LogInformation("Applying pending AuthDbContext migrations...");
-        await dbContext.Database.MigrateAsync(cancellationToken);
+            // Apply pending migrations before seeding (idempotent — no-op if already applied)
+            _logger.LogInformation("Applying pending AuthDbContext migrations...");
+            await dbContext.Database.MigrateAsync(cancellationToken);
 
-        await EnsureAdminUserAsync(dbContext, cancellationToken);
-        await EnsureFrontendClientAsync(appManager, cancellationToken);
-        _logger.LogInformation("Seed data applied successfully.");
+            await EnsureAdminUserAsync(dbContext, cancellationToken);
+            await EnsureFrontendClientAsync(appManager, cancellationToken);
+            _logger.LogInformation("Seed data applied successfully.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "SeedData failed to apply migrations or seed data. The application will continue running, but seeding must be completed manually (e.g., via 'dotnet ef database update'). Common cause: the target PostgreSQL database does not exist yet.");
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

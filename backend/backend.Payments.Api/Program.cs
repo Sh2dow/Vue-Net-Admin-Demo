@@ -75,13 +75,20 @@ await using (var scope = app.Services.CreateAsyncScope())
     var services = scope.ServiceProvider;
     var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 
-    if (await DatabaseExistsAsync(paymentsDbConnectionString))
+    try
     {
-        await services.GetRequiredService<PaymentsDbContext>().Database.EnsureCreatedAsync();
+        if (await DatabaseExistsAsync(paymentsDbConnectionString))
+        {
+            await services.GetRequiredService<PaymentsDbContext>().Database.EnsureCreatedAsync();
+        }
+        else
+        {
+            logger.LogWarning("Skipping PaymentsDbContext migration because database '{Database}' does not exist or is not visible to the current PostgreSQL role.", new NpgsqlConnectionStringBuilder(paymentsDbConnectionString).Database);
+        }
     }
-    else
+    catch (Exception ex)
     {
-        logger.LogWarning("Skipping PaymentsDbContext migration because database '{Database}' does not exist or is not visible to the current PostgreSQL role.", new NpgsqlConnectionStringBuilder(paymentsDbConnectionString).Database);
+        logger.LogWarning(ex, "PaymentsDbContext migration failed. The application will continue running.");
     }
 }
 
@@ -104,6 +111,11 @@ static async Task<bool> DatabaseExistsAsync(string connectionString)
     }
     catch (PostgresException ex) when (ex.SqlState is "42501" or "3D000")
     {
+        return false;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"DatabaseExistsAsync connection error: {ex.Message}");
         return false;
     }
 }

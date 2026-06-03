@@ -3,14 +3,12 @@ WORKDIR /app
 
 ARG VITE_AUTHORITY
 ARG VITE_API_URL
-ENV VITE_AUTHORITY=${VITE_AUTHORITY}
-ENV VITE_API_URL=${VITE_API_URL}
 
 COPY frontend/package.json frontend/bun.lock ./
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 COPY frontend/ ./
-RUN npm run build
+RUN printf "VITE_AUTHORITY=%s\nVITE_API_URL=%s\n" "$VITE_AUTHORITY" "$VITE_API_URL" > .env.production && npm run build
 
 FROM nginx:1.27-alpine AS final
 WORKDIR /usr/share/nginx/html
