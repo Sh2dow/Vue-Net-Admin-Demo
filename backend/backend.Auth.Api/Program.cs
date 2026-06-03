@@ -1,4 +1,6 @@
+using System.Net;
 using System.Security.Claims;
+using System.Text.Json;
 using backend.Auth.Api;
 using backend.Domain.Data;
 using backend.Infrastructure.Application.Users;
@@ -8,7 +10,9 @@ using backend.Shared.Configuration;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
@@ -66,8 +70,8 @@ builder.Services.AddOpenIddict()
         server.AllowAuthorizationCodeFlow()
             .AllowPasswordFlow()
             .AllowRefreshTokenFlow();
+        server.RequireProofKeyForCodeExchange();
 
-        // Token settings
         server.SetAccessTokenLifetime(TimeSpan.FromHours(1))
             .SetRefreshTokenLifetime(TimeSpan.FromDays(30));
 
@@ -93,45 +97,99 @@ builder.Services.AddAuthentication(options =>
 {
     options.LoginPath = "/login";
     options.Cookie.SameSite = SameSiteMode.None;
-    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+        ? CookieSecurePolicy.SameAsRequest
+        : CookieSecurePolicy.Always;
 });
 
 builder.Services.AddAuthorization();
 
-// CORS for dev
+// CORS — origins from configuration (override via env var: CORS__AllowedOrigins)
+// Supports comma-separated string (shell-friendly) or JSON array
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("dev", p => p
-        .WithOrigins(
-            "http://localhost:5173",
-            "http://localhost:3000"
-        )
-        .AllowAnyHeader()
-        .AllowAnyMethod()
-        .AllowCredentials());
+    options.AddPolicy("cors", p =>
+    {
+        var corsBuilder = p.AllowAnyHeader().AllowAnyMethod().AllowCredentials();
+        var raw = builder.Configuration.GetValue<string>("CORS:AllowedOrigins");
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+            // Try JSON array first, fall back to comma-separated
+            var origins = raw.Trim().StartsWith('[')
+                ? JsonSerializer.Deserialize<string[]>(raw) ?? Array.Empty<string>()
+                : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (origins.Length > 0)
+                corsBuilder.WithOrigins(origins);
+            else
+                corsBuilder.WithOrigins("http://localhost:5173", "http://localhost:3000");
+        }
+        else
+        {
+            corsBuilder.WithOrigins("http://localhost:5173", "http://localhost:3000");
+        }
+    });
+});
+
+// Rate limiting
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddFixedWindowLimiter("token", opt =>
+    {
+        opt.PermitLimit = 5;
+        opt.Window = TimeSpan.FromMinutes(1);
+    });
 });
 
 var app = builder.Build();
 
-// Run seeding synchronously before accepting requests (prevents race condition with OIDC)
-using (var scope = app.Services.CreateScope())
+// Run seeding asynchronously (non-blocking)
+_ = Task.Run(async () =>
 {
-    var seed = new SeedData(
-        app.Services,
-        scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<SeedData>>()
-    );
-    await seed.StartAsync(CancellationToken.None);
-}
+    try
+    {
+        using var scope = app.Services.CreateScope();
+        var seed = new SeedData(
+            app.Services,
+            scope.ServiceProvider.GetRequiredService<ILogger<SeedData>>()
+        );
+        await seed.StartAsync(CancellationToken.None);
+    }
+    catch (Exception ex)
+    {
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "Database seeding failed");
+    }
+});
 
 app.UseExceptionHandler();
-app.UseHttpsRedirection();
+
+// ACA terminates TLS and forwards X-Forwarded-* headers.
+// Trust headers from ACA's internal ingress (10.0.0.0/8 VNet range).
+#pragma warning disable ASPDEPR005 // KnownProxies deprecated but has no .NET 10 replacement
+var fho = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor
+                     | ForwardedHeaders.XForwardedHost
+                     | ForwardedHeaders.XForwardedProto,
+};
+fho.KnownIPNetworks.Clear();
+fho.KnownIPNetworks.Add(new System.Net.IPNetwork(IPAddress.Parse("10.0.0.0"), 16));
+fho.KnownProxies.Clear();
+app.UseForwardedHeaders(fho);
+#pragma warning restore ASPDEPR005
+
+if (!app.Environment.IsProduction())
+{
+    app.UseHttpsRedirection();
+}
 app.UseStaticFiles();
 app.UseRouting();
-app.UseCors("dev");
+app.UseCors("cors");
 
 app.UseAuthentication();
 app.UseAuthorization();
 
+app.UseRateLimiter();
 app.UseSwagger();
 app.UseSwaggerUI();
 
@@ -215,7 +273,8 @@ app.MapGet("/login", (string? returnUrl) =>
 app.MapMethods("connect/logout", [HttpMethods.Get, HttpMethods.Post], (HttpContext context) =>
 {
     var postLogoutUri = context.Request.Query["post_logout_redirect_uri"].FirstOrDefault()
-        ?? "http://localhost:5173/login";
+        ?? builder.Configuration["Auth:PostLogoutRedirectUri"]
+        ?? "/login";
 
     return Results.SignOut(
         authenticationSchemes: [CookieAuthenticationDefaults.AuthenticationScheme],

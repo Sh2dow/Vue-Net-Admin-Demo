@@ -92,12 +92,29 @@ builder.Services.PostConfigure<RabbitMqOptions>(options =>
 // Note: RabbitMqOutboxDispatcher removed from backend.Api (gateway/BFF)
 // Each service (Orders, Tasks, Payments, Auth) should register its own dispatcher if needed
 
+// CORS — origins from configuration (override via env var: CORS__AllowedOrigins)
+// Supports comma-separated string (shell-friendly) or JSON array
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("dev", p => p
-        .WithOrigins("http://localhost:5173")
-        .AllowAnyHeader()
-        .AllowAnyMethod());
+    options.AddPolicy("cors", p =>
+    {
+        var corsBuilder = p.AllowAnyHeader().AllowAnyMethod();
+        var raw = builder.Configuration.GetValue<string>("CORS:AllowedOrigins");
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+            var origins = raw.StartsWith("[")
+                ? raw.Trim('[', ']', '"', '\'').Split(',').Select(s => s.Trim('"', '\'')).Where(s => !string.IsNullOrWhiteSpace(s)).ToList()
+                : raw.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+            if (origins.Count > 0)
+                corsBuilder.WithOrigins(origins.ToArray());
+            else
+                corsBuilder.WithOrigins("http://localhost:5173");
+        }
+        else
+        {
+            corsBuilder.WithOrigins("http://localhost:5173");
+        }
+    });
 });
 
 // Configure authentication against OpenIddict authority
@@ -160,7 +177,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseMiddleware<ProblemDetailsExceptionMiddleware>();
 app.UseRouting();
-app.UseCors("dev");
+app.UseCors("cors");
 app.UseAuthentication();
 app.UseAuthorization();
 
