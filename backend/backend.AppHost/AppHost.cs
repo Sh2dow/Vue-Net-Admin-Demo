@@ -18,13 +18,10 @@ SetRequiredEnvironment(api, "DownstreamServices__UsersBaseUrl", "DownstreamServi
 SetRequiredEnvironment(api, "DownstreamServices__TasksBaseUrl", "DownstreamServices:TasksBaseUrl");
 SetRequiredEnvironment(api, "DownstreamServices__OrdersBaseUrl", "DownstreamServices:OrdersBaseUrl");
 SetRequiredEnvironment(api, "DownstreamServices__PaymentsBaseUrl", "DownstreamServices:PaymentsBaseUrl");
-SetOptionalEnvironment(api, "ASPNETCORE_URLS", "AppHost:ServiceBindings:Api");
-
 var authApi = builder.AddProject<Projects.backend_Auth_Api>("auth-api");
 ApplyCommonEnvironment(authApi);
 SetRequiredEnvironment(authApi, "ConnectionStrings__Auth", "ConnectionStrings:Auth");
 SetOptionalEnvironment(authApi, "RabbitMq__Uri", "ConnectionStrings:messaging");
-SetOptionalEnvironment(authApi, "ASPNETCORE_URLS", "AppHost:ServiceBindings:AuthApi");
 
 var usersApi = builder.AddProject<Projects.backend_Users_Api>("users-api");
 ApplyCommonEnvironment(usersApi);
@@ -32,7 +29,6 @@ SetRequiredEnvironment(usersApi, "ConnectionStrings__Auth", "ConnectionStrings:A
 SetOptionalEnvironment(usersApi, "ConnectionStrings__Orders", "ConnectionStrings:Orders");
 SetOptionalEnvironment(usersApi, "RabbitMq__Uri", "ConnectionStrings:messaging");
 SetOptionalEnvironment(usersApi, "RabbitMq__Enabled", "RabbitMq:Enabled");
-SetOptionalEnvironment(usersApi, "ASPNETCORE_URLS", "AppHost:ServiceBindings:UsersApi");
 
 var tasksApi = builder.AddProject<Projects.backend_Tasks_Api>("tasks-api");
 ApplyCommonEnvironment(tasksApi);
@@ -41,7 +37,6 @@ SetRequiredEnvironment(tasksApi, "ConnectionStrings__Auth", "ConnectionStrings:A
 SetRequiredEnvironment(tasksApi, "RabbitMq__Uri", "ConnectionStrings:messaging");
 SetRequiredEnvironment(tasksApi, "Auth__Authority", "Auth:Authority");
 SetOptionalEnvironment(tasksApi, "RabbitMq__Enabled", "RabbitMq:Enabled");
-SetOptionalEnvironment(tasksApi, "ASPNETCORE_URLS", "AppHost:ServiceBindings:TasksApi");
 
 var ordersApi = builder.AddProject<Projects.backend_Orders_Api>("orders-api");
 ordersApi.WithReference(authApi);
@@ -53,7 +48,6 @@ SetRequiredEnvironment(ordersApi, "RabbitMq__Uri", "ConnectionStrings:messaging"
 SetRequiredEnvironment(ordersApi, "Auth__Authority", "Auth:Authority");
 SetRequiredEnvironment(ordersApi, "AuthService__BaseUrl", "AuthService:BaseUrl");
 SetOptionalEnvironment(ordersApi, "RabbitMq__Enabled", "RabbitMq:Enabled");
-SetOptionalEnvironment(ordersApi, "ASPNETCORE_URLS", "AppHost:ServiceBindings:OrdersApi");
 
 var paymentsApi = builder.AddProject<Projects.backend_Payments_Api>("payments-api");
 ApplyCommonEnvironment(paymentsApi);
@@ -62,7 +56,6 @@ SetRequiredEnvironment(paymentsApi, "ConnectionStrings__Payments", "ConnectionSt
 SetRequiredEnvironment(paymentsApi, "ConnectionStrings__Auth", "ConnectionStrings:Auth");
 SetRequiredEnvironment(paymentsApi, "RabbitMq__Uri", "ConnectionStrings:messaging");
 SetOptionalEnvironment(paymentsApi, "RabbitMq__Enabled", "RabbitMq:Enabled");
-SetOptionalEnvironment(paymentsApi, "ASPNETCORE_URLS", "AppHost:ServiceBindings:PaymentsApi");
 
 builder.Build().Run();
 

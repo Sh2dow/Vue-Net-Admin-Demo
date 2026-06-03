@@ -3,7 +3,7 @@ import { ref, computed } from "vue";
 import type { Ref } from "vue";
 
 const appOrigin = window.location.origin;
-const authority = import.meta.env.VITE_AUTHORITY ?? "http://localhost:5001";
+const authority = import.meta.env.VITE_AUTHORITY ?? "https://localhost:5201";
 
 const oidcSettings: UserManagerSettings = {
     authority,

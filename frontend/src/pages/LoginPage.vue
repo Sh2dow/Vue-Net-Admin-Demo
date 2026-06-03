@@ -37,7 +37,7 @@ async function handleLogin() {
                     color="primary"
                     size="large"
                     block
-                    loading="false"
+                    :loading="loading"
                     :disabled="loading || authLoading"
                     prepend-icon="mdi-login"
                     @click="handleLogin"

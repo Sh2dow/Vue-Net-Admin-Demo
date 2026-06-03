@@ -5,8 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using OpenIddict.EntityFrameworkCore.Models;
-using System.Text.Json;
+using OpenIddict.Abstractions;
 
 namespace backend.Auth.Api;
 
@@ -27,12 +26,17 @@ public sealed class SeedData : IHostedService
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Resolve scoped DbContext inside a scope
+        // Resolve scoped services inside a scope
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var appManager = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
+
+        // Apply pending migrations before seeding (idempotent — no-op if already applied)
+        _logger.LogInformation("Applying pending AuthDbContext migrations...");
+        await dbContext.Database.MigrateAsync(cancellationToken);
 
         await EnsureAdminUserAsync(dbContext, cancellationToken);
-        await EnsureFrontendClientAsync(dbContext, cancellationToken);
+        await EnsureFrontendClientAsync(appManager, cancellationToken);
         _logger.LogInformation("Seed data applied successfully.");
     }
 
@@ -63,62 +67,57 @@ public sealed class SeedData : IHostedService
         _logger.LogInformation("Default admin user created (admin/Admin@123).");
     }
 
-    private async Task EnsureFrontendClientAsync(AuthDbContext dbContext, CancellationToken cancellationToken)
+    private async Task EnsureFrontendClientAsync(IOpenIddictApplicationManager manager, CancellationToken cancellationToken)
     {
-        var client = await dbContext.Applications
-            .AsNoTracking()
-            .FirstOrDefaultAsync(a => a.ClientId == "vue-client", cancellationToken);
-
-        if (client is not null)
+        // Delete existing client first to ensure clean state
+        var existing = await manager.FindByClientIdAsync("vue-client", cancellationToken);
+        if (existing is not null)
         {
-            _logger.LogInformation("Frontend client already exists, skipping.");
-            return;
+            await manager.DeleteAsync(existing, cancellationToken);
+            _logger.LogInformation("Frontend client 'vue-client' deleted (recreating with updated permissions).");
         }
 
-        // OpenIddict 7.x: OpenIddictConstants removed — use string literals.
-        // Permissions, RedirectUris, PostLogoutRedirectUris are JSON strings, not collections.
-        client = new OpenIddictEntityFrameworkCoreApplication
+        // Use management API to create client with correct OpenIddict 7.x abbreviated permission keys
+        // ept: = endpoint, gt: = grant type, scp: = scope
+        var descriptor = new OpenIddictApplicationDescriptor
         {
             ClientId = "vue-client",
             ClientType = "public",
-            ConsentType = "explicit",
+            ConsentType = "implicit",
             DisplayName = "Vue.js Admin Dashboard",
-            // Permissions: JSON array of permission strings
-            Permissions = JsonSerializer.Serialize(new[]
+            Permissions =
             {
-                // Endpoints
-                "openiddict:permissions:endpoints:authorization",
-                "openiddict:permissions:endpoints:token",
-                "openiddict:permissions:endpoints:revocation",
-                "openiddict:permissions:endpoints:introspection",
-                "openiddict:permissions:endpoints:userinfo",
-                // Grants
-                "openiddict:permissions:grants:authorization_code",
-                "openiddict:permissions:grants:refresh_token",
-                // Scopes
-                "openiddict:permissions:scopes:openid",
-                "openiddict:permissions:scopes:profile",
-                "openiddict:permissions:scopes:email",
-                "openiddict:permissions:scopes:roles",
-            }),
-            // Redirect URIs: JSON array of URI strings
-            RedirectUris = JsonSerializer.Serialize(new[]
+                // Endpoint permissions (abbreviated format)
+                "ept:authorization",
+                "ept:token",
+                "ept:revocation",
+                "ept:introspection",
+                "ept:end_session",
+                // Grant type permissions (abbreviated format)
+                "gt:authorization_code",
+                "gt:refresh_token",
+                // Response type permissions (prefix: rst:)
+                "rst:code",
+                // Scope permissions (abbreviated format)
+                "scp:openid",
+                "scp:profile",
+                "scp:email",
+                "scp:roles",
+                "scp:offline_access",
+            },
+            RedirectUris =
             {
-                "http://localhost:5173/callback",
-                "http://localhost:5173/",
-                "https://admin.example.com/callback",
-                "https://admin.example.com/",
-            }),
-            // Post-logout redirect URIs: JSON array of URI strings
-            PostLogoutRedirectUris = JsonSerializer.Serialize(new[]
+                new Uri("http://localhost:5173/"),
+                new Uri("http://localhost:5173/callback"),
+            },
+            PostLogoutRedirectUris =
             {
-                "http://localhost:5173/",
-                "https://admin.example.com/",
-            }),
+                new Uri("http://localhost:5173/"),
+                new Uri("http://localhost:5173/login"),
+            },
         };
 
-        dbContext.Applications.Add(client);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await manager.CreateAsync(descriptor, cancellationToken);
         _logger.LogInformation("Frontend client 'vue-client' registered.");
     }
 }
