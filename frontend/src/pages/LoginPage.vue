@@ -1,16 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { ref } from "vue";
 import { useAuth } from "../composables/useAuth";
 
-const { checkAuth, login, isLoading: authLoading } = useAuth();
+const { login, isLoading: authLoading } = useAuth();
 const loading = ref(false);
-
-onMounted(async () => {
-    const authenticated = await checkAuth();
-    if (authenticated) {
-        window.location.href = "/";
-    }
-});
 
 async function handleLogin() {
     loading.value = true;

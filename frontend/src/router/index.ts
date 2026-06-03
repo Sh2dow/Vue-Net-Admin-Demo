@@ -84,10 +84,27 @@ async function ensureAuthCheck(): Promise<boolean> {
 
 // Navigation guard: check auth before entering protected routes
 router.beforeEach(async (to, _from, next: NavigationGuardNext) => {
+    // Check if this is an OIDC callback (code + state params)
+    const hasAuthParams = to.query.code && to.query.state;
+
+    if (hasAuthParams) {
+        // Process the OIDC callback first, before any route logic
+        const authenticated = await ensureAuthCheck();
+
+        if (authenticated) {
+            // Navigate to the app root, clearing the callback params
+            return next("/");
+        }
+
+        // Callback failed, redirect to clean login page
+        return next({ path: "/login", query: {} });
+    }
+
     if (to.meta.public) {
-        // Allow public routes (login page)
-        const { isAuthenticated } = useAuth();
-        if (isAuthenticated.value) {
+        // Wait for auth check to complete so isLoading is properly set to false
+        const authenticated = await ensureAuthCheck();
+
+        if (authenticated) {
             return next({ name: "Users" });
         }
         return next();

@@ -8,7 +8,7 @@ const authority = import.meta.env.VITE_AUTHORITY ?? "https://localhost:5201";
 const oidcSettings: UserManagerSettings = {
     authority,
     client_id: "vue-client",
-    redirect_uri: `${appOrigin}/`,
+    redirect_uri: `${appOrigin}/login`,
     post_logout_redirect_uri: `${appOrigin}/login`,
     response_type: "code",
     scope: "openid profile email roles offline_access",
@@ -43,10 +43,10 @@ export function useAuth() {
         try {
             const result = await userManager.signinRedirectCallback();
             user.value = result;
-            // Clean URL after callback
-            window.history.replaceState({}, document.title, "/");
+            // Let the router guard handle navigation - don't manipulate history here
             return result;
-        } catch {
+        } catch (error) {
+            console.error("OIDC callback failed:", error);
             return null;
         }
     }

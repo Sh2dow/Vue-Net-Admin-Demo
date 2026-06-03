@@ -107,8 +107,7 @@ public sealed class SeedData : IHostedService
             },
             RedirectUris =
             {
-                new Uri("http://localhost:5173/"),
-                new Uri("http://localhost:5173/callback"),
+                new Uri("http://localhost:5173/login"),
             },
             PostLogoutRedirectUris =
             {
