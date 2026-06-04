@@ -121,6 +121,18 @@ onMounted(() => fetchWorkflow(true));
                     <div class="text-subtitle-2 text-medium-emphasis mb-1">Payment State</div>
                     <div class="text-body-1">{{ workflow.payment?.paymentState ?? "—" }}</div>
                 </v-col>
+                <v-col v-if="workflow.order.downloadUrl" cols="12" sm="6">
+                    <div class="text-subtitle-2 text-medium-emphasis mb-1">Download URL</div>
+                    <div class="text-body-1"><a :href="workflow.order.downloadUrl" target="_blank" class="text-decoration-none">{{ workflow.order.downloadUrl }}</a></div>
+                </v-col>
+                <v-col v-if="workflow.order.shippingAddress" cols="12" sm="6">
+                    <div class="text-subtitle-2 text-medium-emphasis mb-1">Shipping Address</div>
+                    <div class="text-body-1">{{ workflow.order.shippingAddress }}</div>
+                </v-col>
+                <v-col v-if="workflow.order.trackingNumber" cols="12" sm="6">
+                    <div class="text-subtitle-2 text-medium-emphasis mb-1">Tracking Number</div>
+                    <div class="text-body-1">{{ workflow.order.trackingNumber }}</div>
+                </v-col>
                 <v-col cols="12" sm="6">
                     <div class="text-subtitle-2 text-medium-emphasis mb-1">Created</div>
                     <div class="text-body-1">{{ new Date(workflow.order.createdAtUtc).toLocaleString() }}</div>

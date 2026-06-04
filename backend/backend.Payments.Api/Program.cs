@@ -1,3 +1,4 @@
+using System.Net;
 using backend.Domain.Data;
 using backend.Infrastructure.Application.Users;
 using backend.Infrastructure.Infrastructure.Messaging;
@@ -6,11 +7,10 @@ using backend.ServiceDefaults;
 using backend.Shared.Application.Messaging;
 using backend.Shared.Application.Users;
 using backend.Shared.Configuration;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.Extensions.Options;
-using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +19,17 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddProblemDetails();
+
+var authAuthority = builder.Configuration["Auth:Authority"];
+if (string.IsNullOrWhiteSpace(authAuthority))
+{
+    throw new InvalidOperationException("Auth:Authority is missing. Configure it in appsettings.json.");
+}
+
+var authAudience = builder.Configuration["Auth:Audience"];
+builder.Services.AddJwtBearerAuthentication(authAuthority, authAudience);
+
+builder.Services.AddAuthorization();
 
 builder.Services.Configure<backend.Shared.Configuration.RabbitMqOptions>(builder.Configuration.GetSection(backend.Shared.Configuration.RabbitMqOptions.SectionName));
 builder.Services.Configure<PaymentOptions>(builder.Configuration.GetSection(PaymentOptions.SectionName));
@@ -40,8 +51,14 @@ if (string.IsNullOrWhiteSpace(authDbConnectionString))
         "Connection string 'Auth' is missing for backend.Payments.Api.");
 }
 
+if (string.IsNullOrWhiteSpace(ordersDbConnectionString))
+{
+    throw new InvalidOperationException(
+        "Connection string 'Orders' is missing for backend.Payments.Api.");
+}
+
 builder.Services.AddDbContext<OrdersDbContext>(options =>
-    options.UseNpgsql(ordersDbConnectionString ?? throw new InvalidOperationException("Connection string 'Orders' is missing for backend.Payments.Api."))
+    options.UseNpgsql(ordersDbConnectionString)
         .UseSnakeCaseNamingConvention());
 
 builder.Services.AddDbContext<PaymentsDbContext>(options =>
@@ -62,11 +79,21 @@ builder.Services.AddSingleton<RabbitMqConnectionFactory>();
 
 // Register outbox for payments service (uses OrdersDbContext for saga state)
 builder.Services.AddScoped<IIntegrationEventOutbox, IntegrationEventOutbox<OrdersDbContext>>();
-if (builder.Configuration.GetValue<bool>("RabbitMq:Enabled", true))
+if (builder.Configuration.GetValue<bool>("RabbitMq:Enabled", false))
 {
     builder.Services.AddHostedService<OutboxDispatcher<OrdersDbContext>>();
     builder.Services.AddHostedService<PaymentStubConsumer>();
 }
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddFixedWindowLimiter("default", opt =>
+    {
+        opt.PermitLimit = 50;
+        opt.Window = TimeSpan.FromMinutes(1);
+    });
+});
 
 var app = builder.Build();
 
@@ -77,56 +104,42 @@ await using (var scope = app.Services.CreateAsyncScope())
 
     try
     {
-        if (await DatabaseExistsAsync(paymentsDbConnectionString))
-        {
-            await services.GetRequiredService<PaymentsDbContext>().Database.EnsureCreatedAsync();
-        }
-        else
-        {
-            logger.LogWarning("Skipping PaymentsDbContext migration because database '{Database}' does not exist or is not visible to the current PostgreSQL role.", new NpgsqlConnectionStringBuilder(paymentsDbConnectionString).Database);
-        }
+        await services.GetRequiredService<PaymentsDbContext>().Database.MigrateAsync();
     }
     catch (Exception ex)
     {
-        logger.LogWarning(ex, "PaymentsDbContext migration failed. The application will continue running.");
-    }
-}
-
-static async Task<bool> DatabaseExistsAsync(string connectionString)
-{
-    var builder = new NpgsqlConnectionStringBuilder(connectionString)
-    {
-        Database = "postgres"
-    };
-
-    await using var connection = new NpgsqlConnection(builder.ConnectionString);
-
-    try
-    {
-        await connection.OpenAsync();
-        await using var command = new NpgsqlCommand("SELECT 1 FROM pg_database WHERE datname = @databaseName", connection);
-        command.Parameters.AddWithValue("databaseName", new NpgsqlConnectionStringBuilder(connectionString).Database ?? string.Empty);
-
-        return await command.ExecuteScalarAsync() is not null;
-    }
-    catch (PostgresException ex) when (ex.SqlState is "42501" or "3D000")
-    {
-        return false;
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"DatabaseExistsAsync connection error: {ex.Message}");
-        return false;
+        logger.LogCritical(ex, "PaymentsDbContext migration failed.");
+        throw;
     }
 }
 
 app.UseExceptionHandler();
+
+// ACA terminates TLS and forwards X-Forwarded-* headers
+#pragma warning disable ASPDEPR005
+var fho = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor
+                     | ForwardedHeaders.XForwardedHost
+                     | ForwardedHeaders.XForwardedProto,
+};
+fho.KnownIPNetworks.Clear();
+fho.KnownIPNetworks.Add(new System.Net.IPNetwork(IPAddress.Parse("10.0.0.0"), 16));
+fho.KnownProxies.Clear();
+app.UseForwardedHeaders(fho);
+#pragma warning restore ASPDEPR005
+
 app.UseSwagger();
 app.UseSwaggerUI();
 
 app.UseRouting();
+app.UseRateLimiter();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 app.MapDefaultEndpoints();
+
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "payments-api" }));
 
 app.Run();

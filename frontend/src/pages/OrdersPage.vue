@@ -12,6 +12,9 @@ const showCreateForm = ref(false);
 const orderType = ref<"digital" | "physical">("digital");
 const totalAmount = ref(100);
 const paymentMethod = ref<"credit_card" | "paypal">("credit_card");
+const downloadUrl = ref("");
+const shippingAddress = ref("");
+const trackingNumber = ref("");
 const creating = ref(false);
 
 const asUserId = computed(() => (route.query.asUserId ? String(route.query.asUserId) : null));
@@ -45,10 +48,19 @@ async function fetchOrders() {
 async function createOrder() {
     creating.value = true;
     try {
-        await ordersApi.create({ orderType: orderType.value, totalAmount: totalAmount.value, paymentMethod: paymentMethod.value }, asUserId.value ?? undefined);
+        const payload: any = { orderType: orderType.value, totalAmount: totalAmount.value, paymentMethod: paymentMethod.value };
+        if (orderType.value === "digital") payload.downloadUrl = downloadUrl.value || `https://example.com/download/order-${Date.now()}`;
+        if (orderType.value === "physical") {
+            payload.shippingAddress = shippingAddress.value;
+            payload.trackingNumber = trackingNumber.value || undefined;
+        }
+        await ordersApi.create(payload, asUserId.value ?? undefined);
         orderType.value = "digital";
         totalAmount.value = 100;
         paymentMethod.value = "credit_card";
+        downloadUrl.value = "";
+        shippingAddress.value = "";
+        trackingNumber.value = "";
         showCreateForm.value = false;
         await fetchOrders();
     } finally {
@@ -140,6 +152,15 @@ onMounted(fetchOrders);
                             variant="outlined"
                             density="comfortable"
                         />
+                    </v-col>
+                    <v-col v-if="orderType === 'digital'" cols="12" sm="4">
+                        <v-text-field v-model="downloadUrl" label="Download URL" placeholder="https://..." variant="outlined" density="comfortable" />
+                    </v-col>
+                    <v-col v-if="orderType === 'physical'" cols="12" sm="4">
+                        <v-text-field v-model="shippingAddress" label="Shipping Address" placeholder="123 Main St, City" variant="outlined" density="comfortable" />
+                    </v-col>
+                    <v-col v-if="orderType === 'physical'" cols="12" sm="3">
+                        <v-text-field v-model="trackingNumber" label="Tracking #" placeholder="Optional" variant="outlined" density="comfortable" />
                     </v-col>
                     <v-col cols="12" class="text-right">
                         <v-btn color="primary" :loading="creating" rounded="lg" @click="createOrder">

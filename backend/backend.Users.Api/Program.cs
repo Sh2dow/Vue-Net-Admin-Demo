@@ -1,3 +1,4 @@
+using System.Net;
 using backend.Domain.Data;
 using backend.Infrastructure.Application.Users;
 using backend.Infrastructure.Infrastructure.Messaging;
@@ -5,10 +6,10 @@ using backend.ServiceDefaults;
 using backend.Shared.Application.Messaging;
 using backend.Shared.Application.Users;
 using backend.Shared.Configuration;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
-using MediatR;
-using Microsoft.Extensions.Options;
-using RabbitMqConnectionFactory = backend.Infrastructure.Infrastructure.Messaging.RabbitMqConnectionFactory;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -30,9 +31,24 @@ if (string.IsNullOrWhiteSpace(authDbConnectionString))
 
 builder.Services.AddDbContext<AuthDbContext>(options =>
     options.UseNpgsql(authDbConnectionString)
-        .UseSnakeCaseNamingConvention());
+        .UseSnakeCaseNamingConvention()
+        .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning)));
+
+var authAuthority = builder.Configuration["Auth:Authority"];
+if (string.IsNullOrWhiteSpace(authAuthority))
+{
+    throw new InvalidOperationException("Auth:Authority is missing. Configure it in appsettings.json.");
+}
+
+var authAudience = builder.Configuration["Auth:Audience"];
+builder.Services.AddJwtBearerAuthentication(authAuthority, authAudience);
+
+builder.Services.AddAuthorization();
 
 builder.Services.AddScoped<IUserDirectory, EfUserDirectory>();
+builder.Services.AddScoped<IEffectiveUserAccessor, EffectiveUserAccessor>();
+builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();
+builder.Services.AddHttpContextAccessor();
 
 // Register RabbitMQ connection factory
 builder.Services.AddSingleton<RabbitMqConnectionFactory>();
@@ -40,35 +56,65 @@ builder.Services.Configure<backend.Shared.Configuration.RabbitMqOptions>(builder
 
 // Register outbox for users service (uses AuthDbContext)
 builder.Services.AddScoped<IIntegrationEventOutbox, IntegrationEventOutbox<AuthDbContext>>();
-if (builder.Configuration.GetValue<bool>("RabbitMq:Enabled", true))
+if (builder.Configuration.GetValue<bool>("RabbitMq:Enabled", false))
 {
     builder.Services.AddHostedService<OutboxDispatcher<AuthDbContext>>();
 }
 
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddFixedWindowLimiter("default", opt =>
+    {
+        opt.PermitLimit = 50;
+        opt.Window = TimeSpan.FromMinutes(1);
+    });
+});
+
 var app = builder.Build();
 
-// Ensure Auth database schema exists at startup (Orders DB is owned by Orders.Api)
-using (var scope = app.Services.CreateScope())
+// Apply pending migrations at startup
+await using (var scope = app.Services.CreateAsyncScope())
 {
     var logger = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Program>>();
     try
     {
-        await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.EnsureCreatedAsync();
-        logger.LogInformation("AuthDbContext schema ensured.");
+        await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.MigrateAsync();
+        logger.LogInformation("AuthDbContext migrations applied.");
     }
     catch (Exception ex)
     {
-        logger.LogWarning(ex, "AuthDbContext EnsureCreated failed (schema may differ from model).");
+        logger.LogCritical(ex, "AuthDbContext migration failed.");
+        throw;
     }
 }
 
 app.UseExceptionHandler();
+
+// ACA terminates TLS and forwards X-Forwarded-* headers
+#pragma warning disable ASPDEPR005
+var fho = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor
+                     | ForwardedHeaders.XForwardedHost
+                     | ForwardedHeaders.XForwardedProto,
+};
+fho.KnownIPNetworks.Clear();
+fho.KnownIPNetworks.Add(new System.Net.IPNetwork(IPAddress.Parse("10.0.0.0"), 16));
+fho.KnownProxies.Clear();
+app.UseForwardedHeaders(fho);
+#pragma warning restore ASPDEPR005
+
 app.UseSwagger();
 app.UseSwaggerUI();
 
 app.UseRouting();
+app.UseRateLimiter();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
+app.MapHealthChecks("/health").AllowAnonymous();
 app.MapDefaultEndpoints();
 
 app.Run();

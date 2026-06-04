@@ -55,6 +55,9 @@ export interface OrderItem {
     totalAmount: number;
     status: string;
     paymentMethod: string;
+    downloadUrl?: string | null;
+    shippingAddress?: string | null;
+    trackingNumber?: string | null;
     createdAtUtc: string;
 }
 
@@ -98,7 +101,7 @@ export const ordersApi = {
         const params = asUserId ? { asUserId } : undefined;
         return api.get<OrderItem[]>("/api/orders", { params });
     },
-    create: (data: { orderType: string; totalAmount: number; paymentMethod: string }, asUserId?: string) => {
+    create: (data: { orderType: string; totalAmount: number; paymentMethod: string; downloadUrl?: string; shippingAddress?: string; trackingNumber?: string }, asUserId?: string) => {
         const params = asUserId ? { asUserId } : undefined;
         return api.post<OrderItem>("/api/orders", data, { params });
     },

@@ -1,3 +1,4 @@
+using System.Net;
 using backend.Domain.Data;
 using backend.Infrastructure.Application.Users;
 using backend.Infrastructure.Infrastructure.Messaging;
@@ -5,8 +6,9 @@ using backend.ServiceDefaults;
 using backend.Shared.Application.Messaging;
 using backend.Shared.Application.Users;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,7 +24,8 @@ if (string.IsNullOrWhiteSpace(authAuthority))
     throw new InvalidOperationException("Auth:Authority is missing. Configure it in appsettings.json.");
 }
 
-builder.Services.AddJwtBearerAuthentication(authAuthority);
+var authAudience = builder.Configuration["Auth:Audience"];
+builder.Services.AddJwtBearerAuthentication(authAuthority, authAudience);
 
 builder.Services.AddAuthorization(options =>
 {
@@ -63,24 +66,25 @@ builder.Services.AddHttpContextAccessor();
 
 // Register RabbitMQ connection factory
 builder.Services.AddSingleton<RabbitMqConnectionFactory>();
-builder.Services.Configure<backend.Shared.Configuration.RabbitMqOptions>(builder.Configuration.GetSection(backend.Shared.Configuration.RabbitMqOptions.SectionName));
-
-// Override RabbitMQ URI from environment variable if available
-builder.Services.PostConfigure<backend.Shared.Configuration.RabbitMqOptions>(options =>
-{
-    var aspireConnectionString = builder.Configuration.GetConnectionString("messaging");
-    if (!string.IsNullOrWhiteSpace(aspireConnectionString))
-    {
-        options.Uri = aspireConnectionString;
-    }
-});
+builder.Services.Configure<backend.Shared.Configuration.RabbitMqOptions>(
+    builder.Configuration.GetSection(backend.Shared.Configuration.RabbitMqOptions.SectionName));
 
 // Register outbox for tasks service
 builder.Services.AddScoped<IIntegrationEventOutbox, IntegrationEventOutbox<TasksDbContext>>();
-if (builder.Configuration.GetValue<bool>("RabbitMq:Enabled", true))
+if (builder.Configuration.GetValue<bool>("RabbitMq:Enabled", false))
 {
     builder.Services.AddHostedService<OutboxDispatcher<TasksDbContext>>();
 }
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddFixedWindowLimiter("default", opt =>
+    {
+        opt.PermitLimit = 50;
+        opt.Window = TimeSpan.FromMinutes(1);
+    });
+});
 
 var app = builder.Build();
 
@@ -91,57 +95,41 @@ await using (var scope = app.Services.CreateAsyncScope())
 
     try
     {
-        if (await DatabaseExistsAsync(tasksDbConnectionString))
-        {
-            await services.GetRequiredService<TasksDbContext>().Database.EnsureCreatedAsync();
-        }
-        else
-        {
-            logger.LogWarning("Skipping TasksDbContext migration because database '{Database}' does not exist or is not visible to the current PostgreSQL role.", new NpgsqlConnectionStringBuilder(tasksDbConnectionString).Database);
-        }
+        await services.GetRequiredService<TasksDbContext>().Database.MigrateAsync();
     }
     catch (Exception ex)
     {
-        logger.LogWarning(ex, "TasksDbContext migration failed. The application will continue running.");
-    }
-}
-
-static async Task<bool> DatabaseExistsAsync(string connectionString)
-{
-    var builder = new NpgsqlConnectionStringBuilder(connectionString)
-    {
-        Database = "postgres"
-    };
-
-    await using var connection = new NpgsqlConnection(builder.ConnectionString);
-
-    try
-    {
-        await connection.OpenAsync();
-        await using var command = new NpgsqlCommand("SELECT 1 FROM pg_database WHERE datname = @databaseName", connection);
-        command.Parameters.AddWithValue("databaseName", new NpgsqlConnectionStringBuilder(connectionString).Database ?? string.Empty);
-
-        return await command.ExecuteScalarAsync() is not null;
-    }
-    catch (PostgresException ex) when (ex.SqlState is "42501" or "3D000")
-    {
-        return false;
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"DatabaseExistsAsync connection error: {ex.Message}");
-        return false;
+        logger.LogCritical(ex, "TasksDbContext migration failed.");
+        throw;
     }
 }
 
 app.UseExceptionHandler();
+
+// ACA terminates TLS and forwards X-Forwarded-* headers
+#pragma warning disable ASPDEPR005
+var fho = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor
+                     | ForwardedHeaders.XForwardedHost
+                     | ForwardedHeaders.XForwardedProto,
+};
+fho.KnownIPNetworks.Clear();
+fho.KnownIPNetworks.Add(new System.Net.IPNetwork(IPAddress.Parse("10.0.0.0"), 16));
+fho.KnownProxies.Clear();
+app.UseForwardedHeaders(fho);
+#pragma warning restore ASPDEPR005
+
 app.UseSwagger();
 app.UseSwaggerUI();
 app.UseRouting();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
 app.MapDefaultEndpoints();
+
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "tasks-api" }));
 
 app.Run();
