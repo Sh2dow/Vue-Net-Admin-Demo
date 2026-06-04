@@ -43,9 +43,6 @@ var paymentsApiImage = '${acrLoginServer}/payments-api:${imageTag}'
 var usersApiImage = '${acrLoginServer}/users-api:${imageTag}'
 var frontendImage = '${acrLoginServer}/frontend:${imageTag}'
 
-param frontendApiUrl string = ''
-param frontendAuthority string = ''
-
 output acrLoginServerOutput string = acrLoginServer
 
 // ============================================================
@@ -55,6 +52,9 @@ output acrLoginServerOutput string = acrLoginServer
 resource postgresqlContainer 'Microsoft.App/containerApps@2024-03-01' = {
   name: 'postgresql-${uniqueSuffix}'
   location: location
+  dependsOn: [
+    pgEnvironmentStorage
+  ]
   properties: {
     managedEnvironmentId: containerAppsEnvironment.id
     configuration: {
@@ -76,6 +76,13 @@ resource postgresqlContainer 'Microsoft.App/containerApps@2024-03-01' = {
         minReplicas: 1
         maxReplicas: 1
       }
+      volumes: [
+        {
+          name: 'pgdata'
+          storageType: 'AzureFile'
+          storageName: 'pgdata'
+        }
+      ]
       containers: [
         {
           name: 'postgresql'
@@ -97,6 +104,30 @@ resource postgresqlContainer 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'POSTGRES_DB'
               value: 'vue_demo_auth'
             }
+            {
+              name: 'PGDATA'
+              value: '/var/lib/postgresql/data/pgdata'
+            }
+          ]
+          volumeMounts: [
+            {
+              volumeName: 'pgdata'
+              mountPath: '/var/lib/postgresql/data'
+            }
+          ]
+          probes: [
+            {
+              type: 'Liveness'
+              tcpSocket: { port: 5432 }
+              initialDelaySeconds: 20
+              periodSeconds: 30
+            }
+            {
+              type: 'Readiness'
+              tcpSocket: { port: 5432 }
+              initialDelaySeconds: 10
+              periodSeconds: 15
+            }
           ]
          }
       ]
@@ -108,33 +139,71 @@ resource postgresqlContainer 'Microsoft.App/containerApps@2024-03-01' = {
 var pgInternalHost = 'postgresql-${uniqueSuffix}'
 var pgConnBase = 'Host=${pgInternalHost};Port=5432;Username=${pgAdminUser};Password=${adminPassword}'
 
-output pgFqdnOutput string = '${pgInternalHost}'
+output pgFqdnOutput string = pgInternalHost
 
 // ============================================================
-// 3. Azure Key Vault
+// 3. Azure Container Apps Environment
 // ============================================================
-var kvName = '${namePrefix}kv${uniqueSuffix}'
+var containerAppsEnvName = '${namePrefix}${uniqueSuffix}env'
+var logAnalyticsName = '${namePrefix}${uniqueSuffix}la'
 
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
-  name: kvName
+resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
+  name: logAnalyticsName
   location: location
   properties: {
-    enabledForDeployment: true
-    enabledForDiskEncryption: true
-    enabledForTemplateDeployment: true
-    enableSoftDelete: true
-    softDeleteRetentionInDays: 7
-    enableRbacAuthorization: false
-    sku: {
-      family: 'A'
-      name: 'standard'
-    }
-    accessPolicies: []
-    tenantId: subscription().tenantId
+    sku: { name: 'PerGB2018' }
+    retentionInDays: 30
   }
 }
 
-output keyVaultName string = keyVault.name
+resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
+  name: containerAppsEnvName
+  location: location
+  properties: {
+    zoneRedundant: false
+    appLogsConfiguration: {
+      destination: 'log-analytics'
+      logAnalyticsConfiguration: {
+        customerId: logAnalyticsWorkspace.properties.customerId
+        sharedKey: logAnalyticsWorkspace.listKeys().primarySharedKey
+      }
+    }
+  }
+}
+
+// Storage account + file share for PostgreSQL persistent data
+resource pgStorageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: '${namePrefix}${uniqueSuffix}st'
+  location: location
+  sku: { name: 'Standard_LRS' }
+  kind: 'StorageV2'
+}
+
+resource pgFileService 'Microsoft.Storage/storageAccounts/fileServices@2023-01-01' = {
+  name: 'default'
+  parent: pgStorageAccount
+}
+
+resource pgFileShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-01-01' = {
+  name: 'pgdata'
+  parent: pgFileService
+}
+
+// Register storage as a volume source in the Container Apps Environment
+resource pgEnvironmentStorage 'Microsoft.App/managedEnvironments/storages@2024-03-01' = {
+  name: 'pgdata'
+  parent: containerAppsEnvironment
+  properties: {
+    azureFile: {
+      accountName: pgStorageAccount.name
+      shareName: pgFileShare.name
+      accessMode: 'ReadWrite'
+      accountKey: pgStorageAccount.listKeys().keys[0].value
+    }
+  }
+}
+
+output pgStorageAccountName string = pgStorageAccount.name
 
 // ============================================================
 // 4. Azure Service Bus (replaces RabbitMQ)
@@ -240,25 +309,12 @@ resource serviceBusAuthRule 'Microsoft.ServiceBus/namespaces/AuthorizationRules@
   }
 }
 
-var sbConnStr = listKeys(serviceBusAuthRule.id, serviceBusAuthRule.apiVersion).primaryConnectionString
+var sbConnStr = serviceBusAuthRule.listKeys().primaryConnectionString
 
 output serviceBusName string = serviceBusNamespace.name
 output serviceBusHostName string = 'https://${serviceBusName}.servicebus.windows.net/'
 // NOTE: sbConnStr uses listKeys() on the AuthorizationRule (not namespace) — this is the correct pattern.
 // AllowAll firewall is kept for dev/demo — Container Apps need to reach PostgreSQL externally.
-
-// ============================================================
-// 5. Azure Container Apps Environment
-// ============================================================
-var containerAppsEnvName = '${namePrefix}${uniqueSuffix}env'
-
-resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
-  name: containerAppsEnvName
-  location: location
-  properties: {
-    zoneRedundant: false
-  }
-}
 
 output containerAppsEnvId string = containerAppsEnvironment.id
 output containerAppsEnvName string = containerAppsEnvironment.name
@@ -272,6 +328,13 @@ var ordersUrl = 'https://orders-api-${uniqueSuffix}.${location}.azurecontainerap
 var paymentsUrl = 'https://payments-api-${uniqueSuffix}.${location}.azurecontainerapps.io'
 var usersUrl = 'https://users-api-${uniqueSuffix}.${location}.azurecontainerapps.io'
 var gatewayUrl = 'https://api-gateway-${uniqueSuffix}.${location}.azurecontainerapps.io'
+var frontendUrl = 'https://frontend-${uniqueSuffix}.${location}.azurecontainerapps.io'
+
+param frontendApiUrl string = ''
+param frontendAuthority string = ''
+
+var effectiveFrontendApiUrl = !empty(frontendApiUrl) ? frontendApiUrl : gatewayUrl
+var effectiveFrontendAuthority = !empty(frontendAuthority) ? frontendAuthority : authUrl
 
 var connAuth = '${pgConnBase};Database=vue_demo_auth'
 var connTasks = '${pgConnBase};Database=vue_demo_tasks'
@@ -314,7 +377,7 @@ resource authApi 'Microsoft.App/containerApps@2024-03-01' = {
     }
     template: {
       scale: {
-        minReplicas: 0
+        minReplicas: 1
         maxReplicas: 2
       }
       containers: [
@@ -349,6 +412,28 @@ resource authApi 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'Auth__Authority'
               value: authUrl
+            }
+            {
+              name: 'Auth__Issuer'
+              value: authUrl
+            }
+            {
+              name: 'CORS__AllowedOrigins'
+              value: frontendUrl
+            }
+          ]
+          probes: [
+            {
+              type: 'Liveness'
+              httpGet: { path: '/health', port: 8080 }
+              initialDelaySeconds: 10
+              periodSeconds: 30
+            }
+            {
+              type: 'Readiness'
+              httpGet: { path: '/health', port: 8080 }
+              initialDelaySeconds: 5
+              periodSeconds: 15
             }
           ]
         }
@@ -428,6 +513,24 @@ resource tasksApi 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'Auth__Authority'
               value: authUrl
+            }
+            {
+              name: 'CORS__AllowedOrigins'
+              value: frontendUrl
+            }
+          ]
+          probes: [
+            {
+              type: 'Liveness'
+              tcpSocket: { port: 8080 }
+              initialDelaySeconds: 10
+              periodSeconds: 30
+            }
+            {
+              type: 'Readiness'
+              tcpSocket: { port: 8080 }
+              initialDelaySeconds: 5
+              periodSeconds: 15
             }
           ]
         }
@@ -516,6 +619,10 @@ resource ordersApi 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'AuthService__BaseUrl'
               value: authUrl
             }
+            {
+              name: 'CORS__AllowedOrigins'
+              value: frontendUrl
+            }
           ]
         }
       ]
@@ -595,6 +702,10 @@ resource paymentsApi 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'ConnectionStrings__Payments'
               value: connPayments
             }
+            {
+              name: 'CORS__AllowedOrigins'
+              value: frontendUrl
+            }
           ]
         }
       ]
@@ -673,6 +784,10 @@ resource usersApi 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'Auth__Authority'
               value: authUrl
+            }
+            {
+              name: 'CORS__AllowedOrigins'
+              value: frontendUrl
             }
           ]
         }
@@ -773,8 +888,6 @@ resource apiGateway 'Microsoft.App/containerApps@2024-03-01' = {
 }
 
 // --- Frontend (Vue.js + nginx) ---
-var frontendUrl = 'https://frontend-${uniqueSuffix}.${location}.azurecontainerapps.io'
-
 resource frontend 'Microsoft.App/containerApps@2024-03-01' = {
   name: 'frontend-${uniqueSuffix}'
   location: location
@@ -820,11 +933,11 @@ resource frontend 'Microsoft.App/containerApps@2024-03-01' = {
           env: [
             {
               name: 'VITE_API_URL'
-              value: frontendApiUrl
+              value: effectiveFrontendApiUrl
             }
             {
               name: 'VITE_AUTHORITY'
-              value: frontendAuthority
+              value: effectiveFrontendAuthority
             }
           ]
         }

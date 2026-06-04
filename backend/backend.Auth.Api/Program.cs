@@ -43,7 +43,8 @@ builder.Services.AddDbContext<AuthDbContext>(options =>
 {
     options.UseNpgsql(authConnectionString)
         .UseSnakeCaseNamingConvention()
-        .UseOpenIddict();
+        .UseOpenIddict()
+        .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
 });
 
 builder.Services.AddScoped<IUserDirectory, EfUserDirectory>();
