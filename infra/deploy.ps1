@@ -1,147 +1,339 @@
 ﻿# Azure deployment script for Vue-Net-Admin-Demo
 # Prerequisites: Azure CLI installed and logged in
-# Usage: .\infra\deploy.ps1
+# Usage: .\infra\deploy.ps1              # run all stages
+#        .\infra\deploy.ps1 -StartAt 4   # skip core infra, build & deploy
+#        .\infra\deploy.ps1 -StartAt 5   # skip build, deploy apps only
+
+param(
+    [int]$StartAt = 1
+)
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$BicepFile = "$ScriptDir/main.bicep"
+$ScriptDir          = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot           = Split-Path -Parent $ScriptDir
+Set-Location $RepoRoot
 
-if (-not (Test-Path -LiteralPath $BicepFile)) {
-    Write-Host "ERROR: Bicep file not found at $BicepFile" -ForegroundColor Red
-    exit 1
+$ResourceGroup      = 'vue-admin-rg'
+$Location           = 'polandcentral'
+$CoreDeploymentName = 'vue-admin-core'
+$AppsDeploymentName = 'vue-admin-apps'
+
+# Unique image tag per build — ACA caches digest on first pull, won't auto-update 'latest'
+$ImageTag = (git rev-parse --short HEAD 2>$null)
+if ([string]::IsNullOrWhiteSpace($ImageTag)) {
+    $ImageTag = (Get-Date -Format 'yyyyMMddHHmmss')
 }
 
-$ResourceGroup = 'vue-admin-rg'
-$Location = 'eastus'
-$DeploymentName = 'vue-admin-infra'
+# Verify Bicep CLI is installed
+az bicep version > $null 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Installing Bicep CLI..." -ForegroundColor Yellow
+    az bicep install | Out-Null
+}
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host " Azure Deployment: Vue-Net-Admin-Demo" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
+Write-Host " Starting at stage: $StartAt" -ForegroundColor Cyan
 Write-Host ""
 
-# 1. Verify login
-Write-Host "[1/6] Verifying Azure login..." -ForegroundColor Yellow
-az account show --query '{name:name,id:id}' | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: Not logged in. Run: az login" -ForegroundColor Red
-    exit 1
+# Stage 1 — Verify login
+if ($StartAt -le 1) {
+    Write-Host "[1/5] Verifying Azure login..." -ForegroundColor Yellow
+    az account show --query '{name:name,id:id}' | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Not logged in. Run: az login" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "  ✓ Logged in" -ForegroundColor Green
 }
 
-# 2. Ensure resource group exists
-Write-Host "[2/6] Checking resource group..." -ForegroundColor Yellow
-$rgExists = az group show --name $ResourceGroup --query id -o tsv 2>$null
-if ([string]::IsNullOrWhiteSpace($rgExists)) {
-    Write-Host "  Creating resource group '$ResourceGroup' in $Location..." -ForegroundColor Gray
-    az group create --name $ResourceGroup --location $Location --tags Environment=dev | Out-Null
-    Write-Host "  ✓ Resource group created" -ForegroundColor Green
-} else {
-    Write-Host "  ✓ Resource group '$ResourceGroup' exists" -ForegroundColor Green
+# Stage 2 — Ensure resource group exists
+if ($StartAt -le 2) {
+    Write-Host "[2/5] Checking resource group..." -ForegroundColor Yellow
+    $ErrorActionPreference = 'Continue'
+    $rgExists = az group show --name $ResourceGroup --query id -o tsv 2>$null
+    $ErrorActionPreference = 'Stop'
+    if ([string]::IsNullOrWhiteSpace($rgExists)) {
+        Write-Host "  Creating resource group '$ResourceGroup' in $Location..." -ForegroundColor Gray
+        az group create --name $ResourceGroup --location $Location --tags Environment=dev | Out-Null
+        Write-Host "  ✓ Resource group created" -ForegroundColor Green
+    } else {
+        Write-Host "  ✓ Resource group '$ResourceGroup' exists" -ForegroundColor Green
+    }
 }
 
-# 3. Build Bicep
-Write-Host "[3/6] Building Bicep template..." -ForegroundColor Yellow
-az bicep build --file $BicepFile | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: Bicep build failed" -ForegroundColor Red
-    exit 1
+# Stage 3 — Deploy core infrastructure (ACR, Service Bus, Key Vault, PG)
+if ($StartAt -le 3) {
+    $CoreBicepFile = "$ScriptDir/infra-core.bicep"
+    Write-Host "[3/5] Deploying core infrastructure (ACR, Service Bus, Key Vault, PostgreSQL)..." -ForegroundColor Yellow
+    $chars = [char[]]'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    $adminPassword = -join ($chars | Get-Random -Count 24)
+    $coreResult = az deployment group create `
+        --resource-group $ResourceGroup `
+        --name $CoreDeploymentName `
+        --template-file $CoreBicepFile `
+        --parameters "adminPassword=$adminPassword" `
+        --output json `
+        --only-show-errors
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Core deployment failed" -ForegroundColor Red
+        exit 1
+    }
+
+    $coreOutputs = $coreResult | Out-String | ConvertFrom-Json
+    $suffix = $coreOutputs.properties.outputs.uniqueSuffix.value
+    $acrLogin = $coreOutputs.properties.outputs.acrLoginServer.value
+    $acrName = $acrLogin -replace '\.azurecr\.io$', ''
+    $uaiId = $coreOutputs.properties.outputs.uaiId.value
+    $pgFqdn = $coreOutputs.properties.outputs.pgFqdn.value
+    $containerAppsEnvId = $coreOutputs.properties.outputs.containerAppsEnvId.value
+    $pgConnBase = $coreOutputs.properties.outputs.pgConnBase.value
+    $sbConnStr = $coreOutputs.properties.outputs.sbConnectionString.value
+    $envDomain = $coreOutputs.properties.outputs.envDomain.value
+
+    Write-Host "  ✓ ACR: $acrLogin" -ForegroundColor Green
+    Write-Host "  ✓ Suffix: $suffix" -ForegroundColor Green
+    Write-Host "  ✓ Image tag: $ImageTag" -ForegroundColor Green
 }
-Write-Host "  ✓ Bicep template compiled" -ForegroundColor Green
 
-# 4. Generate secure alphanumeric password and deploy
-Write-Host "[4/6] Deploying infrastructure (this takes 5-10 minutes)..." -ForegroundColor Yellow
-$chars = [char[]]'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-$adminPassword = -join ($chars | Get-Random -Count 24)
-$deployResult = az deployment group create `
-    --resource-group $ResourceGroup `
-    --name $DeploymentName `
-    --template-file $BicepFile `
-    --parameters "adminPassword=$adminPassword" `
-    --output json `
-    --only-show-errors
+# Resolve core outputs from existing deployment when skipping stages 1-3
+if ($StartAt -gt 3) {
+    Write-Host "Reading existing core outputs..." -ForegroundColor Yellow
+    $coreResult = az deployment group show `
+        --resource-group $ResourceGroup `
+        --name $CoreDeploymentName `
+        --output json 2>$null
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: Deployment failed" -ForegroundColor Red
-    exit 1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Core deployment '$CoreDeploymentName' not found. Deploy core first (-StartAt 1)." -ForegroundColor Red
+        exit 1
+    }
+
+    $coreOutputs = $coreResult | Out-String | ConvertFrom-Json
+    $suffix = $coreOutputs.properties.outputs.uniqueSuffix.value
+    $acrLogin = $coreOutputs.properties.outputs.acrLoginServer.value
+    $acrName = $acrLogin -replace '\.azurecr\.io$', ''
+    $uaiId = $coreOutputs.properties.outputs.uaiId.value
+    $pgFqdn = $coreOutputs.properties.outputs.pgFqdn.value
+    $containerAppsEnvId = $coreOutputs.properties.outputs.containerAppsEnvId.value
+    $pgConnBase = $coreOutputs.properties.outputs.pgConnBase.value
+    $sbConnStr = $coreOutputs.properties.outputs.sbConnectionString.value
+    $envDomain = $coreOutputs.properties.outputs.envDomain.value
+
+    # Read password from .env if available (for local scripts)
+    if (Test-Path "$ScriptDir/.env.azure") {
+        $envLines = Get-Content "$ScriptDir/.env.azure"
+        foreach ($line in $envLines) {
+            if ($line -match '^PG_PASSWORD=(.*)') {
+                $adminPassword = $Matches[1]
+            }
+        }
+    }
+
+    Write-Host "  ✓ ACR: $acrLogin" -ForegroundColor Green
+    Write-Host "  ✓ Suffix: $suffix" -ForegroundColor Green
+    Write-Host "  ✓ Image tag: $ImageTag" -ForegroundColor Green
 }
 
-# 5. Extract outputs
-Write-Host "[5/6] Extracting deployment outputs..." -ForegroundColor Yellow
-$outputs = $deployResult | Out-String | ConvertFrom-Json
+# Stage 3.5 — Create additional databases (PG default entrypoint only creates POSTGRES_DB)
+if ($StartAt -le 4) {
+    Write-Host ""
+    Write-Host "[3.5] Creating additional databases..." -ForegroundColor Yellow
 
-# Outputs are nested under properties.outputs in the deployment result
-$pgPassword = $adminPassword
-$pgFqdn = $outputs.properties.outputs.pgFqdnOutput.value
-$suffix = $outputs.properties.outputs.uniqueSuffix.value
-$acrLogin = $outputs.properties.outputs.acrLoginServerOutput.value
-$authApiUrl = $outputs.properties.outputs.authApiUrl.value
-$apiGatewayUrl = $outputs.properties.outputs.apiGatewayUrl.value
+    # Wait for PG to be ready
+    Write-Host "  Waiting for PostgreSQL..." -ForegroundColor Gray
+    $pgReady = $false
+    for ($i = 1; $i -le 30 -and -not $pgReady; $i++) {
+        try {
+            $pgHealth = az containerapp show-logs --name "postgresql-${suffix}" --resource-group $ResourceGroup --output json 2>$null
+            $pgReady = ($LASTEXITCODE -eq 0)
+        } catch {}
+        if (-not $pgReady) { Start-Sleep -Seconds 5 }
+    }
 
-Write-Host "  ✓ PostgreSQL FQDN: $pgFqdn" -ForegroundColor Green
-Write-Host "  ✓ Suffix: $suffix" -ForegroundColor Green
-Write-Host "  ✓ ACR: $acrLogin" -ForegroundColor Green
-Write-Host "  ✓ Auth API: $authApiUrl" -ForegroundColor Green
-Write-Host "  ✓ API Gateway: $apiGatewayUrl" -ForegroundColor Green
+    # Create missing databases via container exec
+    $dbNames = @('vue_demo_tasks', 'vue_demo_orders', 'vue_demo_payments')
+    foreach ($dbName in $dbNames) {
+        Write-Host "  Creating $dbName..." -ForegroundColor Gray
+        $execCmd = "psql -U vueadmin -d postgres -tc `"`SELECT 1 FROM pg_database WHERE datname='$dbName'`" | grep -q 1 || psql -U vueadmin -d postgres -c `"`CREATE DATABASE $dbName`"`" 2>&1"
+        $ErrorActionPreference = 'Continue'
+        az containerapp exec `
+            --name "postgresql-${suffix}" `
+            --resource-group $ResourceGroup `
+            --command sh `
+            --command -c `
+            --command $execCmd `
+            2>&1 | Out-Null
+        $ErrorActionPreference = 'Stop'
+        Write-Host "  ✓ $dbName" -ForegroundColor Green
+    }
+}
 
-# Save outputs to env file for later use
+# Stage 4 — Build and push Docker images
+if ($StartAt -le 4) {
+    Write-Host ""
+    Write-Host "[4/5] Building and pushing Docker images..." -ForegroundColor Yellow
+
+    $ErrorActionPreference = 'Continue'
+    az acr login --name $acrName | Out-Null
+    $ErrorActionPreference = 'Stop'
+
+    # Services: (displayName, dockerfilePath, context dir)
+    # Dockerfiles reference paths from repo root, so context must be repo root (.)
+    $services = @(
+        @('Auth API',        'backend/backend.Auth.Api/Dockerfile',     '.'),
+        @('Tasks API',       'backend/backend.Tasks.Api/Dockerfile',    '.'),
+        @('Orders API',      'backend/backend.Orders.Api/Dockerfile',   '.'),
+        @('Payments API',    'backend/backend.Payments.Api/Dockerfile', '.'),
+        @('Users API',       'backend/backend.Users.Api/Dockerfile',    '.'),
+        @('API Gateway',     'backend/backend.Api/Dockerfile',          '.'),
+        @('Frontend',        'frontend/Dockerfile',                     'frontend')
+    )
+
+    $imageTags = @('auth-api', 'tasks-api', 'orders-api', 'payments-api', 'users-api', 'api-gateway', 'frontend')
+
+    foreach ($i in 0..($services.Length - 1)) {
+        $displayName = $services[$i][0]
+        $dockerfile  = $services[$i][1]
+        $context     = $services[$i][2]
+        $svcName     = $imageTags[$i]
+        $fullImage   = "${acrLogin}/${svcName}:${ImageTag}"
+
+        Write-Host "  Building $displayName..." -ForegroundColor Gray
+        $ErrorActionPreference = 'Continue'
+        $buildOutput = docker build -f "$RepoRoot/$dockerfile" -t $fullImage "$RepoRoot/$context" 2>&1
+        $buildExitCode = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+
+        if ($buildExitCode -ne 0) {
+            Write-Host "  ERROR: Build failed for $displayName" -ForegroundColor Red
+            Write-Host $buildOutput -ForegroundColor Gray
+            exit 1
+        }
+
+        Write-Host "  Pushing $displayName..." -ForegroundColor Gray
+        $ErrorActionPreference = 'Continue'
+        docker push $fullImage 2>&1 | Out-Null
+        $pushExitCode = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+
+        if ($pushExitCode -ne 0) {
+            Write-Host "  ERROR: Push failed for $displayName" -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "  ✓ $displayName pushed" -ForegroundColor Green
+    }
+}
+
+# Stage 5 — Deploy container apps
+if ($StartAt -le 5) {
+    $AppsBicepFile = "$ScriptDir/infra-apps.bicep"
+    Write-Host ""
+    Write-Host "[5/5] Deploying container apps..." -ForegroundColor Yellow
+    $appsResult = az deployment group create `
+        --resource-group $ResourceGroup `
+        --name $AppsDeploymentName `
+        --template-file $AppsBicepFile `
+        --parameters "uniqueSuffix=$suffix" `
+            "containerAppsEnvId=$containerAppsEnvId" `
+            "acrLoginServer=$acrLogin" `
+            "uaiId=$uaiId" `
+            "imageTag=$ImageTag" `
+            "pgConnBase=$pgConnBase" `
+            "sbConnStr=$sbConnStr" `
+            "envDomain=$envDomain" `
+        --output json `
+        --only-show-errors
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Apps deployment failed" -ForegroundColor Red
+        exit 1
+    }
+
+    $appsOutputs = $appsResult | Out-String | ConvertFrom-Json
+    $authApiUrl = $appsOutputs.properties.outputs.authApiUrl.value
+    $apiGatewayUrl = $appsOutputs.properties.outputs.apiGatewayUrl.value
+    $frontendUrl = $appsOutputs.properties.outputs.frontendUrl.value
+
+    Write-Host "  ✓ Auth API: $authApiUrl" -ForegroundColor Green
+    Write-Host "  ✓ API Gateway: $apiGatewayUrl" -ForegroundColor Green
+    Write-Host "  ✓ Frontend: $frontendUrl" -ForegroundColor Green
+}
+
+# Resolve app URLs when skipping stage 5
+if ($StartAt -gt 5) {
+    $authApiUrl = "https://auth-api-${suffix}.eastus2.azurecontainerapps.io"
+    $apiGatewayUrl = "https://api-gateway-${suffix}.eastus2.azurecontainerapps.io"
+    $frontendUrl = "https://frontend-${suffix}.eastus2.azurecontainerapps.io"
+}
+
+# Save environment file
+Write-Host ""
+Write-Host "Saving environment variables..." -ForegroundColor Yellow
 $envContent = @"
 # Generated by deploy.ps1 on $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 RESOURCE_GROUP=$ResourceGroup
 PG_FQDN=$pgFqdn
-PG_PASSWORD=$pgPassword
+PG_PASSWORD=$adminPassword
 UNIQUE_SUFFIX=$suffix
 ACR_LOGIN=$acrLogin
 AUTH_API_URL=$authApiUrl
 API_GATEWAY_URL=$apiGatewayUrl
+FRONTEND_URL=$frontendUrl
+SB_CONNECTION_STRING=$sbConnStr
 "@
 
 $envFile = "$ScriptDir/.env.azure"
 Set-Content -Path $envFile -Value $envContent
-Write-Host "  ✓ Environment vars saved to $envFile" -ForegroundColor Green
+Write-Host "  ✓ Saved to $envFile" -ForegroundColor Green
 
-# 6. Verify PostgreSQL is running
+# Verify services (cold-start can take 30-60s for minReplicas: 0)
 Write-Host ""
-Write-Host "[6/6] Verifying PostgreSQL deployment..." -ForegroundColor Yellow
-$pgContainerName = "postgresql-${suffix}"
+Write-Host "Verifying services..." -ForegroundColor Yellow
+$maxAttempts = 12
 
-Write-Host "  Waiting for PostgreSQL container to be ready..." -ForegroundColor Gray
-$ready = $false
-$maxRetries = 30
-$retryCount = 0
-while (-not $ready -and $retryCount -lt $maxRetries) {
-    $state = az containerapp show `
-        --name $pgContainerName `
-        --resource-group $ResourceGroup `
-        --query "properties.latestRevisionFqdn" `
-        -o tsv 2>$null
-    if ($state) { $ready = $true }
-    else {
-        $retryCount++
-        Start-Sleep -Seconds 10
+$testUrls = @(
+    @('Auth API',    $authApiUrl + '/health'),
+    @('API Gateway', $apiGatewayUrl + '/health'),
+    @('Frontend',    $frontendUrl)
+)
+
+foreach ($test in $testUrls) {
+    $name = $test[0]
+    $url  = $test[1]
+    $ok   = $false
+
+    for ($attempt = 1; $attempt -le $maxAttempts -and -not $ok; $attempt++) {
+        try {
+            $response = Invoke-WebRequest -Uri $url -Method Get -TimeoutSec 10 -UseBasicParsing 2>$null
+            if ($response.StatusCode -eq 200) { $ok = $true }
+        } catch {}
+
+        if (-not $ok) { Start-Sleep -Seconds 5 }
+    }
+
+    if ($ok) {
+        Write-Host "  ✓ $name OK" -ForegroundColor Green
+    } else {
+        Write-Host "  ⚠ $name not responding yet (cold-start, check ACA logs)" -ForegroundColor Yellow
     }
 }
 
-if (-not $ready) {
-    Write-Host "  ⚠ PostgreSQL container not ready within 5 min." -ForegroundColor Yellow
-} else {
-    Write-Host "  ✓ PostgreSQL container is ready" -ForegroundColor Green
-    Write-Host "  ℹ Database 'vue_demo_auth' auto-created by POSTGRES_DB env var." -ForegroundColor Gray
-    Write-Host "  ℹ Other databases (vue_demo_tasks, vue_demo_orders, vue_demo_payments)" -ForegroundColor Gray
-    Write-Host "    will be created on first EF Core migration via each service's" -ForegroundColor Gray
-    Write-Host "    startup initializer. See .infra/migrate.ps1." -ForegroundColor Gray
-}
-
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host " Infrastructure deployment complete!" -ForegroundColor Green
+Write-Host " Deployment complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Frontend:    $frontendUrl" -ForegroundColor Cyan
+Write-Host "API Gateway: $apiGatewayUrl" -ForegroundColor Cyan
+Write-Host "Auth API:    $authApiUrl" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Yellow
-Write-Host "  1. Build Docker images: .\infra\build-images.ps1" -ForegroundColor White
-Write-Host "  2. Run EF migrations: .\infra\migrate.ps1" -ForegroundColor White
-Write-Host "  3. Seed auth data: az containerapp exec (auth-api)" -ForegroundColor White
-Write-Host "  4. Deploy frontend: az staticwebapp deploy" -ForegroundColor White
+Write-Host "  Databases created automatically on PG startup" -ForegroundColor White
+Write-Host "  Auth.Api seeds admin/admin on startup" -ForegroundColor White
 Write-Host ""
 Write-Host "⚠️  COST WARNING: Delete when done!" -ForegroundColor Red
 Write-Host "   az group delete --name $ResourceGroup --yes --no-wait" -ForegroundColor Gray

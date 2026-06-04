@@ -1,11 +1,16 @@
 import axios from "axios";
 import { userManager } from "../composables/useAuth";
-
-const API_URL = import.meta.env.VITE_API_URL ?? "";
+import { loadConfig } from '../config';
 
 export const api = axios.create({
-    baseURL: API_URL || "/",
+    baseURL: "/",
 });
+
+// Set baseURL from runtime config
+(async () => {
+    const config = await loadConfig();
+    api.defaults.baseURL = config.apiUrl || "/";
+})();
 
 // Attach JWT token to requests
 api.interceptors.request.use(async (config) => {

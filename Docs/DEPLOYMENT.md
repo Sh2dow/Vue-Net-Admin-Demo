@@ -90,7 +90,7 @@ az account set --subscription "Your-Subscription-ID"
 # Create resource group (if not exists)
 az group create `
   --name vue-admin-demo-rg `
-  --location eastus
+  --location polandcentral
 
 # Deploy Bicep template
 .\infra\deploy.ps1

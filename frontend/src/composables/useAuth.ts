@@ -1,22 +1,36 @@
 import { UserManager, type UserManagerSettings, type User } from "oidc-client-ts";
 import { ref, computed } from "vue";
 import type { Ref } from "vue";
+import { loadConfig } from '../config';
 
 const appOrigin = window.location.origin;
-const authority = import.meta.env.VITE_AUTHORITY ?? "https://localhost:5201";
 
-const oidcSettings: UserManagerSettings = {
-    authority,
-    client_id: "vue-client",
-    redirect_uri: `${appOrigin}/login`,
-    post_logout_redirect_uri: `${appOrigin}/login`,
-    response_type: "code",
-    scope: "openid profile email roles offline_access",
-    automaticSilentRenew: true,
-    filterProtocolClaims: true,
+let userManagerInstance: UserManager | null = null;
+
+async function ensureUserManager(): Promise<UserManager> {
+    if (!userManagerInstance) {
+        const config = await loadConfig();
+        const oidcSettings: UserManagerSettings = {
+            authority: config.authority,
+            client_id: "vue-client",
+            redirect_uri: `${appOrigin}/login`,
+            post_logout_redirect_uri: `${appOrigin}/login`,
+            response_type: "code",
+            scope: "openid profile email roles offline_access",
+            automaticSilentRenew: true,
+            filterProtocolClaims: true,
+        };
+        userManagerInstance = new UserManager(oidcSettings);
+    }
+    return userManagerInstance;
+}
+
+export const userManager = {
+    signinRedirect: () => ensureUserManager().then(m => m.signinRedirect()),
+    signinRedirectCallback: () => ensureUserManager().then(m => m.signinRedirectCallback()),
+    signoutRedirect: () => ensureUserManager().then(m => m.signoutRedirect()),
+    getUser: () => ensureUserManager().then(m => m.getUser()),
 };
-
-export const userManager = new UserManager(oidcSettings);
 
 // Reactive user state shared across the app
 export const user: Ref<User | null> = ref(null);

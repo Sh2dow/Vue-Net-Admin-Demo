@@ -2,6 +2,7 @@ using backend.Domain.Data;
 using backend.Domain.Models;
 using BCrypt.Net;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -16,11 +17,13 @@ namespace backend.Auth.Api;
 public sealed class SeedData : IHostedService
 {
     private readonly IServiceProvider _serviceProvider;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<SeedData> _logger;
 
-    public SeedData(IServiceProvider serviceProvider, ILogger<SeedData> logger)
+    public SeedData(IServiceProvider serviceProvider, IConfiguration configuration, ILogger<SeedData> logger)
     {
         _serviceProvider = serviceProvider;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -77,6 +80,9 @@ public sealed class SeedData : IHostedService
 
     private async Task EnsureFrontendClientAsync(IOpenIddictApplicationManager manager, CancellationToken cancellationToken)
     {
+        // Resolve frontend origins from CORS config (env var CORS__AllowedOrigins)
+        var origins = ResolveFrontendOrigins(_configuration);
+
         // Delete existing client first to ensure clean state
         var existing = await manager.FindByClientIdAsync("vue-client", cancellationToken);
         if (existing is not null)
@@ -93,38 +99,49 @@ public sealed class SeedData : IHostedService
             ClientType = "public",
             ConsentType = "implicit",
             DisplayName = "Vue.js Admin Dashboard",
-            Permissions =
-            {
-                // Endpoint permissions (abbreviated format)
-                "ept:authorization",
-                "ept:token",
-                "ept:revocation",
-                "ept:introspection",
-                "ept:end_session",
-                // Grant type permissions (abbreviated format)
-                "gt:authorization_code",
-                "gt:refresh_token",
-                // Response type permissions (prefix: rst:)
-                "rst:code",
-                // Scope permissions (abbreviated format)
-                "scp:openid",
-                "scp:profile",
-                "scp:email",
-                "scp:roles",
-                "scp:offline_access",
-            },
-            RedirectUris =
-            {
-                new Uri("http://localhost:5173/login"),
-            },
-            PostLogoutRedirectUris =
-            {
-                new Uri("http://localhost:5173/"),
-                new Uri("http://localhost:5173/login"),
-            },
         };
 
+        // Permissions
+        descriptor.Permissions.Add("ept:authorization");
+        descriptor.Permissions.Add("ept:token");
+        descriptor.Permissions.Add("ept:revocation");
+        descriptor.Permissions.Add("ept:introspection");
+        descriptor.Permissions.Add("ept:end_session");
+        descriptor.Permissions.Add("gt:authorization_code");
+        descriptor.Permissions.Add("gt:refresh_token");
+        descriptor.Permissions.Add("rst:code");
+        descriptor.Permissions.Add("scp:openid");
+        descriptor.Permissions.Add("scp:profile");
+        descriptor.Permissions.Add("scp:email");
+        descriptor.Permissions.Add("scp:roles");
+        descriptor.Permissions.Add("scp:offline_access");
+
+        // Redirect URIs from CORS config
+        foreach (var uri in origins)
+        {
+            descriptor.RedirectUris.Add(new Uri($"{uri}/login"));
+            descriptor.PostLogoutRedirectUris.Add(new Uri($"{uri}/"));
+        }
+
         await manager.CreateAsync(descriptor, cancellationToken);
-        _logger.LogInformation("Frontend client 'vue-client' registered.");
+        _logger.LogInformation("Frontend client 'vue-client' registered with redirect URIs: {Uris}", string.Join(", ", descriptor.RedirectUris));
+    }
+
+    /// <summary>
+    /// Resolves allowed frontend origins from CORS:AllowedOrigins config (env var CORS__AllowedOrigins).
+    /// Falls back to localhost:5173 if not set.
+    /// </summary>
+    private static string[] ResolveFrontendOrigins(IConfiguration configuration)
+    {
+        var raw = configuration.GetValue<string>("CORS:AllowedOrigins");
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+            var origins = raw.Trim().StartsWith('[')
+                ? System.Text.Json.JsonSerializer.Deserialize<string[]>(raw) ?? Array.Empty<string>()
+                : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (origins.Length > 0)
+                return origins;
+        }
+        return new[] { "http://localhost:5173" };
     }
 }

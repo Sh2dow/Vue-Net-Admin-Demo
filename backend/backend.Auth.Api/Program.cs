@@ -143,29 +143,32 @@ builder.Services.AddRateLimiter(options =>
 
 var app = builder.Build();
 
-// Run seeding asynchronously (non-blocking)
-_ = Task.Run(async () =>
+// Apply migrations + seed data before accepting requests.
+// OpenIddict must be able to read the database before serving /.well-known/openid-configuration.
+// The try/catch in SeedData already logs warnings on failure (e.g. database not ready yet).
+using (var scope = app.Services.CreateScope())
 {
-    try
-    {
-        using var scope = app.Services.CreateScope();
-        var seed = new SeedData(
-            app.Services,
-            scope.ServiceProvider.GetRequiredService<ILogger<SeedData>>()
-        );
-        await seed.StartAsync(CancellationToken.None);
-    }
-    catch (Exception ex)
-    {
-        var logger = app.Services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "Database seeding failed");
-    }
-});
+    var seed = new SeedData(
+        app.Services,
+        builder.Configuration,
+        scope.ServiceProvider.GetRequiredService<ILogger<SeedData>>()
+    );
+    await seed.StartAsync(CancellationToken.None);
+}
 
 app.UseExceptionHandler();
 
-// ACA terminates TLS and forwards X-Forwarded-* headers.
-// Trust headers from ACA's internal ingress (10.0.0.0/8 VNet range).
+// ACA terminates TLS at the ingress — app receives HTTP, so force HTTPS scheme in production.
+if (app.Environment.IsProduction())
+{
+    app.Use(async (context, next) =>
+    {
+        context.Request.Scheme = "https";
+        await next();
+    });
+}
+
+// Trust forwarded headers from ACA's internal ingress (10.0.0.0/8 VNet range).
 #pragma warning disable ASPDEPR005 // KnownProxies deprecated but has no .NET 10 replacement
 var fho = new ForwardedHeadersOptions
 {
