@@ -144,7 +144,7 @@ resource tasksApi 'Microsoft.App/containerApps@2024-03-01' = {
       registries: [sharedRegistry]
     }
     template: {
-      scale: { minReplicas: 0, maxReplicas: 2 }
+      scale: { minReplicas: 1, maxReplicas: 2 }
       containers: [
         {
           name: 'tasks-api'
@@ -206,7 +206,7 @@ resource ordersApi 'Microsoft.App/containerApps@2024-03-01' = {
       registries: [sharedRegistry]
     }
     template: {
-      scale: { minReplicas: 0, maxReplicas: 2 }
+      scale: { minReplicas: 1, maxReplicas: 2 }
       containers: [
         {
           name: 'orders-api'
@@ -270,7 +270,7 @@ resource paymentsApi 'Microsoft.App/containerApps@2024-03-01' = {
       registries: [sharedRegistry]
     }
     template: {
-      scale: { minReplicas: 0, maxReplicas: 2 }
+      scale: { minReplicas: 1, maxReplicas: 2 }
       containers: [
         {
           name: 'payments-api'
@@ -332,7 +332,7 @@ resource usersApi 'Microsoft.App/containerApps@2024-03-01' = {
       registries: [sharedRegistry]
     }
     template: {
-      scale: { minReplicas: 0, maxReplicas: 2 }
+      scale: { minReplicas: 1, maxReplicas: 2 }
       containers: [
         {
           name: 'users-api'
@@ -394,7 +394,7 @@ resource apiGateway 'Microsoft.App/containerApps@2024-03-01' = {
       registries: [sharedRegistry]
     }
     template: {
-      scale: { minReplicas: 0, maxReplicas: 3 }
+      scale: { minReplicas: 1, maxReplicas: 3 }
       containers: [
         {
           name: 'api-gateway'
@@ -411,6 +411,7 @@ resource apiGateway 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'DownstreamServices__OrdersBaseUrl', value: ordersUrl }
             { name: 'DownstreamServices__PaymentsBaseUrl', value: paymentsUrl }
             { name: 'Auth__Authority', value: authUrl }
+            { name: 'CORS__AllowedOrigins', value: frontendUrl }
           ]
           probes: [
             {

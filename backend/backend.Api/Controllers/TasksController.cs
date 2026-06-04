@@ -113,4 +113,17 @@ public class TasksController : ControllerBase
         var comment = await response.Content.ReadFromJsonAsync<TaskCommentDto>(ct);
         return comment == null ? NotFound() : Ok(comment);
     }
+
+    [HttpGet("debugroles")]
+    public async Task<ActionResult<IReadOnlyList<string>>> GetDebugRoles(CancellationToken ct)
+    {
+        using var response = await SendAsync(HttpMethod.Get, "api/tasks/debugroles", null, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            return StatusCode((int)response.StatusCode);
+        }
+
+        var roles = await response.Content.ReadFromJsonAsync<IReadOnlyList<string>>(ct);
+        return Ok(roles);
+    }
 }

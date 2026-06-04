@@ -92,6 +92,8 @@ builder.Services.PostConfigure<RabbitMqOptions>(options =>
 // Note: RabbitMqOutboxDispatcher removed from backend.Api (gateway/BFF)
 // Each service (Orders, Tasks, Payments, Auth) should register its own dispatcher if needed
 
+var corsOrigins = builder.Configuration.GetValue<string>("CORS:AllowedOrigins");
+
 // CORS — origins from configuration (override via env var: CORS__AllowedOrigins)
 // Supports comma-separated string (shell-friendly) or JSON array
 builder.Services.AddCors(options =>
@@ -99,12 +101,11 @@ builder.Services.AddCors(options =>
     options.AddPolicy("cors", p =>
     {
         var corsBuilder = p.AllowAnyHeader().AllowAnyMethod();
-        var raw = builder.Configuration.GetValue<string>("CORS:AllowedOrigins");
-        if (!string.IsNullOrWhiteSpace(raw))
+        if (!string.IsNullOrWhiteSpace(corsOrigins))
         {
-            var origins = raw.StartsWith("[")
-                ? raw.Trim('[', ']', '"', '\'').Split(',').Select(s => s.Trim('"', '\'')).Where(s => !string.IsNullOrWhiteSpace(s)).ToList()
-                : raw.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+            var origins = corsOrigins.StartsWith("[")
+                ? corsOrigins.Trim('[', ']', '"', '\'').Split(',').Select(s => s.Trim('"', '\'')).Where(s => !string.IsNullOrWhiteSpace(s)).ToList()
+                : corsOrigins.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
             if (origins.Count > 0)
                 corsBuilder.WithOrigins(origins.ToArray());
             else
@@ -161,9 +162,18 @@ static void ConfigureDownstreamClient(HttpClient client, string? baseUrl, string
     client.Timeout = TimeSpan.FromSeconds(10);
 }
 
+if (string.IsNullOrWhiteSpace(corsOrigins))
+{
+    app.Logger.LogWarning(
+        "CORS:AllowedOrigins not configured. Falling back to http://localhost:5173. " +
+        "Set CORS__AllowedOrigins env var (e.g. https://your-frontend.azurecontainerapps.io) " +
+        "for browser-based access in production.");
+}
+
 app.Logger.LogInformation(
-    "Startup config. Environment={Environment}; RabbitMq={RabbitMq}; AuthAuthority={AuthAuthority}",
+    "Startup config. Environment={Environment}; CORS={CorsOrigins}; RabbitMq={RabbitMq}; AuthAuthority={AuthAuthority}",
     app.Environment.EnvironmentName,
+    corsOrigins ?? "(fallback: http://localhost:5173)",
     FormatRabbitMqTarget(rabbitMqOptions?.Uri),
     authAuthority);
 
@@ -182,6 +192,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHealthChecks("/health").AllowAnonymous();
 app.MapDefaultEndpoints();
 
 app.Run();
