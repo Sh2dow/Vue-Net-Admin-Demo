@@ -45,7 +45,6 @@ async function handleLogout() {
             <!-- User dropdown -->
             <v-menu
                 location="bottom"
-                location-strategy="connected"
                 transition="scale-transition"
             >
                 <template #activator="{ props }">
@@ -123,6 +122,12 @@ async function handleLogout() {
         </v-main>
     </v-app>
 </template>
+
+<style>
+.v-toolbar__content {
+    overflow: visible !important;
+}
+</style>
 
 <style scoped>
 .layout-drawer {

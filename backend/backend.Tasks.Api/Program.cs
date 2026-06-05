@@ -1,6 +1,7 @@
 using System.Net;
 using backend.Domain.Data;
 using backend.Infrastructure.Application.Users;
+using backend.Infrastructure.Infrastructure.Database;
 using backend.Infrastructure.Infrastructure.Messaging;
 using backend.ServiceDefaults;
 using backend.Shared.Application.Messaging;
@@ -86,23 +87,9 @@ builder.Services.AddRateLimiter(options =>
     });
 });
 
+builder.Services.AddDatabaseMigration<TasksDbContext>();
+
 var app = builder.Build();
-
-await using (var scope = app.Services.CreateAsyncScope())
-{
-    var services = scope.ServiceProvider;
-    var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
-
-    try
-    {
-        await services.GetRequiredService<TasksDbContext>().Database.MigrateAsync();
-    }
-    catch (Exception ex)
-    {
-        logger.LogCritical(ex, "TasksDbContext migration failed.");
-        throw;
-    }
-}
 
 app.UseExceptionHandler();
 

@@ -1,6 +1,7 @@
 using System.Net;
 using backend.Domain.Data;
 using backend.Infrastructure.Application.Users;
+using backend.Infrastructure.Infrastructure.Database;
 using backend.Infrastructure.Infrastructure.Messaging;
 using backend.Payments.Infrastructure.Payments;
 using backend.ServiceDefaults;
@@ -95,23 +96,9 @@ builder.Services.AddRateLimiter(options =>
     });
 });
 
+builder.Services.AddDatabaseMigration<PaymentsDbContext>();
+
 var app = builder.Build();
-
-await using (var scope = app.Services.CreateAsyncScope())
-{
-    var services = scope.ServiceProvider;
-    var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
-
-    try
-    {
-        await services.GetRequiredService<PaymentsDbContext>().Database.MigrateAsync();
-    }
-    catch (Exception ex)
-    {
-        logger.LogCritical(ex, "PaymentsDbContext migration failed.");
-        throw;
-    }
-}
 
 app.UseExceptionHandler();
 

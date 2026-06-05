@@ -121,6 +121,7 @@ public sealed class SeedData : IHostedService
         {
             descriptor.RedirectUris.Add(new Uri($"{uri}/login"));
             descriptor.PostLogoutRedirectUris.Add(new Uri($"{uri}/"));
+            descriptor.PostLogoutRedirectUris.Add(new Uri($"{uri}/login"));
         }
 
         await manager.CreateAsync(descriptor, cancellationToken);

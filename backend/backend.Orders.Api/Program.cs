@@ -1,5 +1,6 @@
 using backend.Domain.Data;
 using backend.Infrastructure.Application.Users;
+using backend.Infrastructure.Infrastructure.Database;
 using backend.Infrastructure.Infrastructure.Messaging;
 using backend.Orders.Infrastructure.Orders;
 using backend.Orders.Validation.Orders;
@@ -100,6 +101,8 @@ builder.Services.PostConfigure<backend.Shared.Configuration.RabbitMqOptions>(opt
 
 // Register outbox for orders service (uses OrdersDbContext)
 builder.Services.AddScoped<IIntegrationEventOutbox, IntegrationEventOutbox<OrdersDbContext>>();
+
+builder.Services.AddDatabaseMigration<OrdersDbContext>();
 
 var app = builder.Build();
 
