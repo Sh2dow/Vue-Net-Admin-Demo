@@ -64,12 +64,29 @@ if ($StartAt -le 2) {
     }
 }
 
+# Stage 2.5 — Load persisted PG password from .env.azure if available
+$pgPasswordFile = "$ScriptDir/.env.azure"
+if (Test-Path $pgPasswordFile) {
+    $existingEnv = Get-Content $pgPasswordFile
+    foreach ($line in $existingEnv) {
+        if ($line -match '^PG_PASSWORD=(.*)') {
+            $adminPassword = $Matches[1]
+            Write-Host "  Using existing PG password from .env.azure" -ForegroundColor Green
+            break
+        }
+    }
+}
+
 # Stage 3 — Deploy core infrastructure (ACR, Service Bus, Key Vault, PG)
 if ($StartAt -le 3) {
     $CoreBicepFile = "$ScriptDir/infra-core.bicep"
     Write-Host "[3/5] Deploying core infrastructure (ACR, Service Bus, Key Vault, PostgreSQL)..." -ForegroundColor Yellow
-    $chars = [char[]]'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-    $adminPassword = -join ($chars | Get-Random -Count 24)
+
+    # Only generate a new password if one wasn't loaded from .env.azure
+    if (-not $adminPassword) {
+        $chars = [char[]]'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+        $adminPassword = -join ($chars | Get-Random -Count 24)
+    }
     $coreResult = az deployment group create `
         --resource-group $ResourceGroup `
         --name $CoreDeploymentName `

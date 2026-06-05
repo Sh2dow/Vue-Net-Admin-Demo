@@ -50,7 +50,7 @@ async function handleLogout() {
                 <template #activator="{ props }">
                     <v-btn
                         v-bind="props"
-                        variant="tonal"
+                        variant="flat"
                         color="white"
                         prepend-icon="mdi-account"
                         size="small"
