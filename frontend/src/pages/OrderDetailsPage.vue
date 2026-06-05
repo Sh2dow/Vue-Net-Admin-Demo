@@ -42,8 +42,9 @@ async function fetchWorkflow(isInitialFetch: boolean = false) {
         workflow.value = res.data;
         stopPolling();
 
-        // Only poll while payment is still pending
-        if (res.data.payment?.paymentState === "PaymentPending") {
+        // Poll while any timeline step is still pending (covers full saga flow)
+        const hasPendingSteps = res.data.timeline?.some(s => s.state === "Pending");
+        if (hasPendingSteps) {
             pollTimer = setTimeout(fetchWorkflow, 3000);
         }
     } catch (err) {
