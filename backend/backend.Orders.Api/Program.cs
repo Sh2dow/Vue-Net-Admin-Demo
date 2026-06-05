@@ -85,19 +85,39 @@ builder.Services.AddScoped<IEffectiveUserAccessor, EffectiveUserAccessor>();
 builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();
 builder.Services.AddHttpContextAccessor();
 
-// Register RabbitMQ connection factory
-builder.Services.AddSingleton<RabbitMqConnectionFactory>();
-builder.Services.Configure<backend.Shared.Configuration.RabbitMqOptions>(builder.Configuration.GetSection(backend.Shared.Configuration.RabbitMqOptions.SectionName));
-
-// Override RabbitMQ URI from environment variable if available
-builder.Services.PostConfigure<backend.Shared.Configuration.RabbitMqOptions>(options =>
+var sbConnStr = builder.Configuration["ServiceBus:ConnectionString"];
+if (!string.IsNullOrWhiteSpace(sbConnStr))
 {
-    var aspireConnectionString = builder.Configuration.GetConnectionString("messaging");
-    if (!string.IsNullOrWhiteSpace(aspireConnectionString))
+    builder.Services.AddSingleton(_ => new Azure.Messaging.ServiceBus.ServiceBusClient(sbConnStr));
+    builder.Services.AddSingleton<IOutboxPublisher, ServiceBusOutboxPublisher>();
+    builder.Services.AddHostedService<OutboxDispatcher<OrdersDbContext>>();
+    builder.Services.AddHostedService<ServiceBusOrderSagaConsumer>();
+    builder.Services.AddHostedService<ServiceBusOrderExecutionDispatchConsumer>();
+}
+else
+{
+    // Register RabbitMQ connection factory
+    builder.Services.AddSingleton<RabbitMqConnectionFactory>();
+    builder.Services.Configure<backend.Shared.Configuration.RabbitMqOptions>(builder.Configuration.GetSection(backend.Shared.Configuration.RabbitMqOptions.SectionName));
+
+    // Override RabbitMQ URI from environment variable if available
+    builder.Services.PostConfigure<backend.Shared.Configuration.RabbitMqOptions>(options =>
     {
-        options.Uri = aspireConnectionString;
+        var aspireConnectionString = builder.Configuration.GetConnectionString("messaging");
+        if (!string.IsNullOrWhiteSpace(aspireConnectionString))
+        {
+            options.Uri = aspireConnectionString;
+        }
+    });
+
+    if (builder.Configuration.GetValue<bool>("RabbitMq:Enabled", false))
+    {
+        builder.Services.AddSingleton<IOutboxPublisher, RabbitMqOutboxPublisher>();
+        builder.Services.AddHostedService<OutboxDispatcher<OrdersDbContext>>();
+        builder.Services.AddHostedService<OrderSagaConsumer>();
+        builder.Services.AddHostedService<OrderExecutionDispatchConsumer>();
     }
-});
+}
 
 // Register outbox for orders service (uses OrdersDbContext)
 builder.Services.AddScoped<IIntegrationEventOutbox, IntegrationEventOutbox<OrdersDbContext>>();

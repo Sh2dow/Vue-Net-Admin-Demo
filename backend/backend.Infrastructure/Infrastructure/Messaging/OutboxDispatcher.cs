@@ -7,7 +7,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using RabbitMQ.Client;
 
 namespace backend.Infrastructure.Infrastructure.Messaging;
 
@@ -15,41 +14,34 @@ public sealed class OutboxDispatcher<TContext> : BackgroundService
     where TContext : DbContext
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly RabbitMqConnectionFactory _connectionFactory;
+    private readonly IOutboxPublisher _publisher;
     private readonly RabbitMqOptions _options;
     private readonly ILogger<OutboxDispatcher<TContext>> _logger;
 
     public OutboxDispatcher(
         IServiceScopeFactory scopeFactory,
-        RabbitMqConnectionFactory connectionFactory,
+        IOutboxPublisher publisher,
         IOptions<RabbitMqOptions> options,
         ILogger<OutboxDispatcher<TContext>> logger)
     {
         _scopeFactory = scopeFactory;
-        _connectionFactory = connectionFactory;
+        _publisher = publisher;
         _options = options.Value;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await _publisher.EnsureInitializedAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await using var connection = await _connectionFactory.CreateConnectionAsync(stoppingToken);
-                
-                await using var channel = await connection.CreateChannelAsync(cancellationToken: stoppingToken);
-
-                await RabbitMqTopology.EnsureConfiguredAsync(channel, _options, stoppingToken);
-
-                while (!stoppingToken.IsCancellationRequested)
+                var published = await PublishBatchAsync(stoppingToken);
+                if (!published)
                 {
-                    var published = await PublishBatchAsync(channel, stoppingToken);
-                    if (!published)
-                    {
-                        await Task.Delay(TimeSpan.FromSeconds(_options.RetryDelaySeconds), stoppingToken);
-                    }
+                    await Task.Delay(TimeSpan.FromSeconds(_options.RetryDelaySeconds), stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -58,12 +50,13 @@ public sealed class OutboxDispatcher<TContext> : BackgroundService
             }
             catch (Exception ex)
             {
+                _logger.LogWarning(ex, "Outbox dispatch failed. Retrying.");
                 await Task.Delay(TimeSpan.FromSeconds(_options.RetryDelaySeconds), stoppingToken);
             }
         }
     }
 
-    private async Task<bool> PublishBatchAsync(IChannel channel, CancellationToken ct)
+    private async Task<bool> PublishBatchAsync(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<TContext>();
@@ -84,23 +77,14 @@ public sealed class OutboxDispatcher<TContext> : BackgroundService
         {
             try
             {
-                var properties = new BasicProperties
-                {
-                    Persistent = true,
-                    ContentType = "application/json",
-                    Type = message.EventType,
-                    MessageId = message.Id.ToString(),
-                    CorrelationId = message.CorrelationId
-                };
-
                 var body = Encoding.UTF8.GetBytes(message.Payload);
-                await channel.BasicPublishAsync(
-                    exchange: _options.Exchange,
-                    routingKey: message.RoutingKey,
-                    mandatory: false,
-                    basicProperties: properties,
-                    body: body,
-                    cancellationToken: ct);
+                await _publisher.PublishAsync(
+                    message.RoutingKey,
+                    body,
+                    message.EventType,
+                    message.CorrelationId,
+                    message.Id.ToString(),
+                    ct);
 
                 message.PublishedAtUtc = DateTime.UtcNow;
                 message.LastError = null;

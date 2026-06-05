@@ -50,16 +50,28 @@ builder.Services.AddScoped<IEffectiveUserAccessor, EffectiveUserAccessor>();
 builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();
 builder.Services.AddHttpContextAccessor();
 
-// Register RabbitMQ connection factory
-builder.Services.AddSingleton<RabbitMqConnectionFactory>();
-builder.Services.Configure<backend.Shared.Configuration.RabbitMqOptions>(builder.Configuration.GetSection(backend.Shared.Configuration.RabbitMqOptions.SectionName));
+var sbConnStr = builder.Configuration["ServiceBus:ConnectionString"];
+if (!string.IsNullOrWhiteSpace(sbConnStr))
+{
+    builder.Services.AddSingleton(_ => new Azure.Messaging.ServiceBus.ServiceBusClient(sbConnStr));
+    builder.Services.AddSingleton<IOutboxPublisher, ServiceBusOutboxPublisher>();
+    builder.Services.AddHostedService<OutboxDispatcher<AuthDbContext>>();
+}
+else
+{
+    // Register RabbitMQ connection factory
+    builder.Services.AddSingleton<RabbitMqConnectionFactory>();
+    builder.Services.Configure<backend.Shared.Configuration.RabbitMqOptions>(builder.Configuration.GetSection(backend.Shared.Configuration.RabbitMqOptions.SectionName));
+
+    if (builder.Configuration.GetValue<bool>("RabbitMq:Enabled", false))
+    {
+        builder.Services.AddSingleton<IOutboxPublisher, RabbitMqOutboxPublisher>();
+        builder.Services.AddHostedService<OutboxDispatcher<AuthDbContext>>();
+    }
+}
 
 // Register outbox for users service (uses AuthDbContext)
 builder.Services.AddScoped<IIntegrationEventOutbox, IntegrationEventOutbox<AuthDbContext>>();
-if (builder.Configuration.GetValue<bool>("RabbitMq:Enabled", false))
-{
-    builder.Services.AddHostedService<OutboxDispatcher<AuthDbContext>>();
-}
 
 builder.Services.AddRateLimiter(options =>
 {
