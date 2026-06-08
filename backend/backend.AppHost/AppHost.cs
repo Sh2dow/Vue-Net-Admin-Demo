@@ -57,6 +57,14 @@ SetRequiredEnvironment(paymentsApi, "ConnectionStrings__Auth", "ConnectionString
 SetRequiredEnvironment(paymentsApi, "RabbitMq__Uri", "ConnectionStrings:messaging");
 SetOptionalEnvironment(paymentsApi, "RabbitMq__Enabled", "RabbitMq:Enabled");
 
+var functions = builder.AddProject<Projects.backend_Functions>("functions");
+ApplyCommonEnvironment(functions);
+SetRequiredEnvironment(functions, "ConnectionStrings__Tasks", "ConnectionStrings:Tasks");
+SetRequiredEnvironment(functions, "ConnectionStrings__Orders", "ConnectionStrings:Orders");
+SetRequiredEnvironment(functions, "ConnectionStrings__Auth", "ConnectionStrings:Auth");
+SetRequiredEnvironment(functions, "ServiceBus__ConnectionString", "ConnectionStrings:messaging");
+SetOptionalEnvironment(functions, "Auth__Authority", "Auth:Authority");
+
 builder.Build().Run();
 
 void ApplyCommonEnvironment(IResourceBuilder<ProjectResource> project)

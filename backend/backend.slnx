@@ -3,6 +3,7 @@
 		<Project Path="backend.AppHost/backend.AppHost.csproj" />
 		<Project Path="backend.Api/backend.Api.csproj" />
 		<Project Path="backend.Auth.Api/backend.Auth.Api.csproj" />
+		<Project Path="backend.Functions/backend.Functions.csproj" />
 	</Folder>
 
 	<Folder Name="/Services/">

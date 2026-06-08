@@ -207,10 +207,11 @@ if ($StartAt -le 4) {
         @('Payments API',    'backend/backend.Payments.Api/Dockerfile', '.'),
         @('Users API',       'backend/backend.Users.Api/Dockerfile',    '.'),
         @('API Gateway',     'backend/backend.Api/Dockerfile',          '.'),
+        @('Functions',       'backend/backend.Functions/Dockerfile',    '.'),
         @('Frontend',        'frontend/Dockerfile',                     'frontend')
     )
 
-    $imageTags = @('auth-api', 'tasks-api', 'orders-api', 'payments-api', 'users-api', 'api-gateway', 'frontend')
+    $imageTags = @('auth-api', 'tasks-api', 'orders-api', 'payments-api', 'users-api', 'api-gateway', 'functions', 'frontend')
 
     foreach ($i in 0..($services.Length - 1)) {
         $displayName = $services[$i][0]
@@ -273,10 +274,12 @@ if ($StartAt -le 5) {
     $appsOutputs = $appsResult | Out-String | ConvertFrom-Json
     $authApiUrl = $appsOutputs.properties.outputs.authApiUrl.value
     $apiGatewayUrl = $appsOutputs.properties.outputs.apiGatewayUrl.value
+    $functionsUrl = $appsOutputs.properties.outputs.functionsUrl.value
     $frontendUrl = $appsOutputs.properties.outputs.frontendUrl.value
 
     Write-Host "  ✓ Auth API: $authApiUrl" -ForegroundColor Green
     Write-Host "  ✓ API Gateway: $apiGatewayUrl" -ForegroundColor Green
+    Write-Host "  ✓ Functions: $functionsUrl" -ForegroundColor Green
     Write-Host "  ✓ Frontend: $frontendUrl" -ForegroundColor Green
 }
 
@@ -284,6 +287,7 @@ if ($StartAt -le 5) {
 if ($StartAt -gt 5) {
     $authApiUrl = "https://auth-api-${suffix}.eastus2.azurecontainerapps.io"
     $apiGatewayUrl = "https://api-gateway-${suffix}.eastus2.azurecontainerapps.io"
+    $functionsUrl = "https://functions-${suffix}.eastus2.azurecontainerapps.io"
     $frontendUrl = "https://frontend-${suffix}.eastus2.azurecontainerapps.io"
 }
 
@@ -299,6 +303,7 @@ UNIQUE_SUFFIX=$suffix
 ACR_LOGIN=$acrLogin
 AUTH_API_URL=$authApiUrl
 API_GATEWAY_URL=$apiGatewayUrl
+FUNCTIONS_URL=$functionsUrl
 FRONTEND_URL=$frontendUrl
 SB_CONNECTION_STRING=$sbConnStr
 "@
@@ -315,6 +320,7 @@ $maxAttempts = 12
 $testUrls = @(
     @('Auth API',    $authApiUrl + '/health'),
     @('API Gateway', $apiGatewayUrl + '/health'),
+    @('Functions',   $functionsUrl + '/health'),
     @('Frontend',    $frontendUrl)
 )
 
@@ -346,6 +352,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Frontend:    $frontendUrl" -ForegroundColor Cyan
 Write-Host "API Gateway: $apiGatewayUrl" -ForegroundColor Cyan
+Write-Host "Functions:   $functionsUrl" -ForegroundColor Cyan
 Write-Host "Auth API:    $authApiUrl" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Yellow

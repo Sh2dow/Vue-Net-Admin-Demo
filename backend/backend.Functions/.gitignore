@@ -1,0 +1,11 @@
+# Azure Functions localsettings file
+local.settings.json
+
+# Build outputs
+bin/
+obj/
+
+# IDE
+.idea/
+*.user
+*.suo

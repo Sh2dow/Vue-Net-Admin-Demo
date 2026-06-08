@@ -21,6 +21,7 @@
     <ProjectReference Include="..\backend.Tasks.Api\backend.Tasks.Api.csproj" />
     <ProjectReference Include="..\backend.Orders.Api\backend.Orders.Api.csproj" />
     <ProjectReference Include="..\backend.Payments.Api\backend.Payments.Api.csproj" />
+    <ProjectReference Include="..\backend.Functions\backend.Functions.csproj" />
   </ItemGroup>
 
 </Project>
