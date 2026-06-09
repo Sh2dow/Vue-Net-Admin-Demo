@@ -64,9 +64,8 @@ public sealed class PaymentsDbContextFactory : IDesignTimeDbContextFactory<Payme
     private static PaymentsDbContext CreateDbContext(string connectionString)
     {
         var optionsBuilder = new DbContextOptionsBuilder<PaymentsDbContext>();
-        optionsBuilder.UseNpgsql(connectionString, npgsql =>
-                npgsql.MigrationsAssembly(typeof(PaymentsDbContext).Assembly.GetName().Name))
-            .UseSnakeCaseNamingConvention();
+        optionsBuilder.UseSqlServer(connectionString, sql =>
+                sql.MigrationsAssembly(typeof(PaymentsDbContext).Assembly.GetName().Name));
 
         return new PaymentsDbContext(optionsBuilder.Options);
     }

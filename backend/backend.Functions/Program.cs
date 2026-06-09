@@ -29,22 +29,19 @@ var host = new HostBuilder()
         if (!string.IsNullOrWhiteSpace(tasksDbConnectionString))
         {
             services.AddDbContext<TasksDbContext>(options =>
-                options.UseNpgsql(tasksDbConnectionString)
-                    .UseSnakeCaseNamingConvention());
+                options.UseSqlServer(tasksDbConnectionString));
         }
 
         if (!string.IsNullOrWhiteSpace(ordersDbConnectionString))
         {
             services.AddDbContext<OrdersDbContext>(options =>
-                options.UseNpgsql(ordersDbConnectionString)
-                    .UseSnakeCaseNamingConvention());
+                options.UseSqlServer(ordersDbConnectionString));
         }
 
         if (!string.IsNullOrWhiteSpace(authDbConnectionString))
         {
             services.AddDbContext<AuthDbContext>(options =>
-                options.UseNpgsql(authDbConnectionString)
-                    .UseSnakeCaseNamingConvention());
+                options.UseSqlServer(authDbConnectionString));
         }
 
         // User services

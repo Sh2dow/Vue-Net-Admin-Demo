@@ -64,23 +64,23 @@ if ($StartAt -le 2) {
     }
 }
 
-# Stage 2.5 — Load persisted PG password from .env.azure if available
-$pgPasswordFile = "$ScriptDir/.env.azure"
-if (Test-Path $pgPasswordFile) {
-    $existingEnv = Get-Content $pgPasswordFile
+# Stage 2.5 — Load persisted SQL admin password from .env.azure if available
+$sqlPasswordFile = "$ScriptDir/.env.azure"
+if (Test-Path $sqlPasswordFile) {
+    $existingEnv = Get-Content $sqlPasswordFile
     foreach ($line in $existingEnv) {
-        if ($line -match '^PG_PASSWORD=(.*)') {
+        if ($line -match '^SQL_PASSWORD=(.*)') {
             $adminPassword = $Matches[1]
-            Write-Host "  Using existing PG password from .env.azure" -ForegroundColor Green
+            Write-Host "  Using existing SQL password from .env.azure" -ForegroundColor Green
             break
         }
     }
 }
 
-# Stage 3 — Deploy core infrastructure (ACR, Service Bus, Key Vault, PG)
+# Stage 3 — Deploy core infrastructure (ACR, Service Bus, Key Vault, Azure SQL)
 if ($StartAt -le 3) {
     $CoreBicepFile = "$ScriptDir/infra-core.bicep"
-    Write-Host "[3/5] Deploying core infrastructure (ACR, Service Bus, Key Vault, PostgreSQL)..." -ForegroundColor Yellow
+    Write-Host "[3/5] Deploying core infrastructure (ACR, Service Bus, Key Vault, Azure SQL)..." -ForegroundColor Yellow
 
     # Only generate a new password if one wasn't loaded from .env.azure
     if (-not $adminPassword) {
@@ -105,9 +105,9 @@ if ($StartAt -le 3) {
     $acrLogin = $coreOutputs.properties.outputs.acrLoginServer.value
     $acrName = $acrLogin -replace '\.azurecr\.io$', ''
     $uaiId = $coreOutputs.properties.outputs.uaiId.value
-    $pgFqdn = $coreOutputs.properties.outputs.pgFqdn.value
+    $sqlServerFqdn = $coreOutputs.properties.outputs.sqlServerFqdn.value
     $containerAppsEnvId = $coreOutputs.properties.outputs.containerAppsEnvId.value
-    $pgConnBase = $coreOutputs.properties.outputs.pgConnBase.value
+    $sqlConnBase = $coreOutputs.properties.outputs.sqlConnBase.value
     $sbConnStr = $coreOutputs.properties.outputs.sbConnectionString.value
     $envDomain = $coreOutputs.properties.outputs.envDomain.value
 
@@ -134,9 +134,9 @@ if ($StartAt -gt 3) {
     $acrLogin = $coreOutputs.properties.outputs.acrLoginServer.value
     $acrName = $acrLogin -replace '\.azurecr\.io$', ''
     $uaiId = $coreOutputs.properties.outputs.uaiId.value
-    $pgFqdn = $coreOutputs.properties.outputs.pgFqdn.value
+    $sqlServerFqdn = $coreOutputs.properties.outputs.sqlServerFqdn.value
     $containerAppsEnvId = $coreOutputs.properties.outputs.containerAppsEnvId.value
-    $pgConnBase = $coreOutputs.properties.outputs.pgConnBase.value
+    $sqlConnBase = $coreOutputs.properties.outputs.sqlConnBase.value
     $sbConnStr = $coreOutputs.properties.outputs.sbConnectionString.value
     $envDomain = $coreOutputs.properties.outputs.envDomain.value
 
@@ -144,7 +144,7 @@ if ($StartAt -gt 3) {
     if (Test-Path "$ScriptDir/.env.azure") {
         $envLines = Get-Content "$ScriptDir/.env.azure"
         foreach ($line in $envLines) {
-            if ($line -match '^PG_PASSWORD=(.*)') {
+            if ($line -match '^SQL_PASSWORD=(.*)') {
                 $adminPassword = $Matches[1]
             }
         }
@@ -155,39 +155,7 @@ if ($StartAt -gt 3) {
     Write-Host "  ✓ Image tag: $ImageTag" -ForegroundColor Green
 }
 
-# Stage 3.5 — Create additional databases (PG default entrypoint only creates POSTGRES_DB)
-if ($StartAt -le 4) {
-    Write-Host ""
-    Write-Host "[3.5] Creating additional databases..." -ForegroundColor Yellow
-
-    # Wait for PG to be ready
-    Write-Host "  Waiting for PostgreSQL..." -ForegroundColor Gray
-    $pgReady = $false
-    for ($i = 1; $i -le 30 -and -not $pgReady; $i++) {
-        try {
-            $pgHealth = az containerapp show-logs --name "postgresql-${suffix}" --resource-group $ResourceGroup --output json 2>$null
-            $pgReady = ($LASTEXITCODE -eq 0)
-        } catch {}
-        if (-not $pgReady) { Start-Sleep -Seconds 5 }
-    }
-
-    # Create missing databases via container exec
-    $dbNames = @('vue_demo_tasks', 'vue_demo_orders', 'vue_demo_payments')
-    foreach ($dbName in $dbNames) {
-        Write-Host "  Creating $dbName..." -ForegroundColor Gray
-        $execCmd = "psql -U vueadmin -d postgres -tc `"`SELECT 1 FROM pg_database WHERE datname='$dbName'`" | grep -q 1 || psql -U vueadmin -d postgres -c `"`CREATE DATABASE $dbName`"`" 2>&1"
-        $ErrorActionPreference = 'Continue'
-        az containerapp exec `
-            --name "postgresql-${suffix}" `
-            --resource-group $ResourceGroup `
-            --command sh `
-            --command -c `
-            --command $execCmd `
-            2>&1 | Out-Null
-        $ErrorActionPreference = 'Stop'
-        Write-Host "  ✓ $dbName" -ForegroundColor Green
-    }
-}
+# Stage 3.5 — (Azure SQL databases are created by Bicep; no extra setup needed)
 
 # Stage 4 — Build and push Docker images
 if ($StartAt -le 4) {
@@ -207,11 +175,10 @@ if ($StartAt -le 4) {
         @('Payments API',    'backend/backend.Payments.Api/Dockerfile', '.'),
         @('Users API',       'backend/backend.Users.Api/Dockerfile',    '.'),
         @('API Gateway',     'backend/backend.Api/Dockerfile',          '.'),
-        @('Functions',       'backend/backend.Functions/Dockerfile',    '.'),
         @('Frontend',        'frontend/Dockerfile',                     'frontend')
     )
 
-    $imageTags = @('auth-api', 'tasks-api', 'orders-api', 'payments-api', 'users-api', 'api-gateway', 'functions', 'frontend')
+    $imageTags = @('auth-api', 'tasks-api', 'orders-api', 'payments-api', 'users-api', 'api-gateway', 'frontend')
 
     foreach ($i in 0..($services.Length - 1)) {
         $displayName = $services[$i][0]
@@ -260,7 +227,7 @@ if ($StartAt -le 5) {
             "acrLoginServer=$acrLogin" `
             "uaiId=$uaiId" `
             "imageTag=$ImageTag" `
-            "pgConnBase=$pgConnBase" `
+            "sqlConnBase=$sqlConnBase" `
             "sbConnStr=$sbConnStr" `
             "envDomain=$envDomain" `
         --output json `
@@ -274,12 +241,18 @@ if ($StartAt -le 5) {
     $appsOutputs = $appsResult | Out-String | ConvertFrom-Json
     $authApiUrl = $appsOutputs.properties.outputs.authApiUrl.value
     $apiGatewayUrl = $appsOutputs.properties.outputs.apiGatewayUrl.value
-    $functionsUrl = $appsOutputs.properties.outputs.functionsUrl.value
     $frontendUrl = $appsOutputs.properties.outputs.frontendUrl.value
+    $tasksApiUrl = $appsOutputs.properties.outputs.tasksApiUrl.value
+    $ordersApiUrl = $appsOutputs.properties.outputs.ordersApiUrl.value
+    $paymentsApiUrl = $appsOutputs.properties.outputs.paymentsApiUrl.value
+    $usersApiUrl = $appsOutputs.properties.outputs.usersApiUrl.value
 
     Write-Host "  ✓ Auth API: $authApiUrl" -ForegroundColor Green
+    Write-Host "  ✓ Tasks API: $tasksApiUrl" -ForegroundColor Green
+    Write-Host "  ✓ Orders API: $ordersApiUrl" -ForegroundColor Green
+    Write-Host "  ✓ Payments API: $paymentsApiUrl" -ForegroundColor Green
+    Write-Host "  ✓ Users API: $usersApiUrl" -ForegroundColor Green
     Write-Host "  ✓ API Gateway: $apiGatewayUrl" -ForegroundColor Green
-    Write-Host "  ✓ Functions: $functionsUrl" -ForegroundColor Green
     Write-Host "  ✓ Frontend: $frontendUrl" -ForegroundColor Green
 }
 
@@ -287,8 +260,11 @@ if ($StartAt -le 5) {
 if ($StartAt -gt 5) {
     $authApiUrl = "https://auth-api-${suffix}.eastus2.azurecontainerapps.io"
     $apiGatewayUrl = "https://api-gateway-${suffix}.eastus2.azurecontainerapps.io"
-    $functionsUrl = "https://functions-${suffix}.eastus2.azurecontainerapps.io"
     $frontendUrl = "https://frontend-${suffix}.eastus2.azurecontainerapps.io"
+    $tasksApiUrl = "https://tasks-api-${suffix}.eastus2.azurecontainerapps.io"
+    $ordersApiUrl = "https://orders-api-${suffix}.eastus2.azurecontainerapps.io"
+    $paymentsApiUrl = "https://payments-api-${suffix}.eastus2.azurecontainerapps.io"
+    $usersApiUrl = "https://users-api-${suffix}.eastus2.azurecontainerapps.io"
 }
 
 # Save environment file
@@ -297,13 +273,12 @@ Write-Host "Saving environment variables..." -ForegroundColor Yellow
 $envContent = @"
 # Generated by deploy.ps1 on $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 RESOURCE_GROUP=$ResourceGroup
-PG_FQDN=$pgFqdn
-PG_PASSWORD=$adminPassword
+SQL_SERVER=$sqlServerFqdn
+SQL_PASSWORD=$adminPassword
 UNIQUE_SUFFIX=$suffix
 ACR_LOGIN=$acrLogin
 AUTH_API_URL=$authApiUrl
 API_GATEWAY_URL=$apiGatewayUrl
-FUNCTIONS_URL=$functionsUrl
 FRONTEND_URL=$frontendUrl
 SB_CONNECTION_STRING=$sbConnStr
 "@
@@ -319,8 +294,11 @@ $maxAttempts = 12
 
 $testUrls = @(
     @('Auth API',    $authApiUrl + '/health'),
+    @('Tasks API',   $tasksApiUrl + '/health'),
+    @('Orders API',  $ordersApiUrl + '/health'),
+    @('Payments API',$paymentsApiUrl + '/health'),
+    @('Users API',   $usersApiUrl + '/health'),
     @('API Gateway', $apiGatewayUrl + '/health'),
-    @('Functions',   $functionsUrl + '/health'),
     @('Frontend',    $frontendUrl)
 )
 
@@ -352,11 +330,10 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Frontend:    $frontendUrl" -ForegroundColor Cyan
 Write-Host "API Gateway: $apiGatewayUrl" -ForegroundColor Cyan
-Write-Host "Functions:   $functionsUrl" -ForegroundColor Cyan
 Write-Host "Auth API:    $authApiUrl" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Yellow
-Write-Host "  Databases created automatically on PG startup" -ForegroundColor White
+Write-Host "  Databases created automatically by Azure SQL Bicep deployment" -ForegroundColor White
 Write-Host "  Auth.Api seeds admin/admin on startup" -ForegroundColor White
 Write-Host ""
 Write-Host "⚠️  COST WARNING: Delete when done!" -ForegroundColor Red

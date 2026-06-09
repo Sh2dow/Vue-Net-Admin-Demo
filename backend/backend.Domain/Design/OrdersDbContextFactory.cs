@@ -64,9 +64,8 @@ public sealed class OrdersDbContextFactory : IDesignTimeDbContextFactory<OrdersD
     private static OrdersDbContext CreateDbContext(string connectionString)
     {
         var optionsBuilder = new DbContextOptionsBuilder<OrdersDbContext>();
-        optionsBuilder.UseNpgsql(connectionString, npgsql =>
-                npgsql.MigrationsAssembly(typeof(OrdersDbContext).Assembly.GetName().Name))
-            .UseSnakeCaseNamingConvention();
+        optionsBuilder.UseSqlServer(connectionString, sql =>
+                sql.MigrationsAssembly(typeof(OrdersDbContext).Assembly.GetName().Name));
 
         return new OrdersDbContext(optionsBuilder.Options);
     }

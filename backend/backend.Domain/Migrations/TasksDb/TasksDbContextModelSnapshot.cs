@@ -2,8 +2,8 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using backend.Domain.Data;
 
 #nullable disable
@@ -18,100 +18,82 @@ namespace backend.Domain.Migrations.TasksDb
 #pragma warning disable 612, 618
             modelBuilder
                 .HasAnnotation("ProductVersion", "10.0.8")
-                .HasAnnotation("Relational:MaxIdentifierLength", 63);
+                .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
-            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
+            SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
             modelBuilder.Entity("backend.Domain.Models.TaskComment", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("AuthorId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("author_id");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Content")
                         .IsRequired()
                         .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)")
-                        .HasColumnName("content");
+                        .HasColumnType("nvarchar(1000)");
 
                     b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid>("TaskId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("task_id");
+                        .HasColumnType("uniqueidentifier");
 
-                    b.HasKey("Id")
-                        .HasName("pk_task_comments");
+                    b.HasKey("Id");
 
-                    b.HasIndex("AuthorId")
-                        .HasDatabaseName("ix_task_comments_author_id");
+                    b.HasIndex("AuthorId");
 
-                    b.HasIndex("TaskId")
-                        .HasDatabaseName("ix_task_comments_task_id");
+                    b.HasIndex("TaskId");
 
-                    b.ToTable("task_comments", (string)null);
+                    b.ToTable("TaskComments");
                 });
 
             modelBuilder.Entity("backend.Domain.Models.TaskItem", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Description")
                         .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)")
-                        .HasColumnName("description");
+                        .HasColumnType("nvarchar(2000)");
 
                     b.Property<string>("Priority")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasDefaultValue("medium")
-                        .HasColumnName("priority");
+                        .HasColumnType("nvarchar(32)")
+                        .HasDefaultValue("medium");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasDefaultValue("todo")
-                        .HasColumnName("status");
+                        .HasColumnType("nvarchar(32)")
+                        .HasDefaultValue("todo");
 
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("title");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid>("UserId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("user_id");
+                        .HasColumnType("uniqueidentifier");
 
-                    b.HasKey("Id")
-                        .HasName("pk_tasks");
+                    b.HasKey("Id");
 
-                    b.HasIndex("UserId")
-                        .HasDatabaseName("ix_tasks_user_id");
+                    b.HasIndex("UserId");
 
-                    b.ToTable("tasks", (string)null);
+                    b.ToTable("Tasks");
                 });
 
             modelBuilder.Entity("backend.Domain.Models.TaskComment", b =>
@@ -120,8 +102,7 @@ namespace backend.Domain.Migrations.TasksDb
                         .WithMany("Comments")
                         .HasForeignKey("TaskId")
                         .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_task_comments_tasks_task_id");
+                        .IsRequired();
 
                     b.Navigation("Task");
                 });

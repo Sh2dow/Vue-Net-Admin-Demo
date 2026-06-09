@@ -64,9 +64,8 @@ public sealed class TasksDbContextFactory : IDesignTimeDbContextFactory<TasksDbC
     private static TasksDbContext CreateDbContext(string connectionString)
     {
         var optionsBuilder = new DbContextOptionsBuilder<TasksDbContext>();
-        optionsBuilder.UseNpgsql(connectionString, npgsql =>
-                npgsql.MigrationsAssembly(typeof(TasksDbContext).Assembly.GetName().Name))
-            .UseSnakeCaseNamingConvention();
+        optionsBuilder.UseSqlServer(connectionString, sql =>
+                sql.MigrationsAssembly(typeof(TasksDbContext).Assembly.GetName().Name));
 
         return new TasksDbContext(optionsBuilder.Options);
     }

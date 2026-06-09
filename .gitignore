@@ -386,3 +386,26 @@ obj/
 # OS
 .DS_Store
 Thumbs.db
+# JetBrains Rider / IntelliJ
+.idea/
+*.sln.iml
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+
+# Rider
+.idea_modules/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Bicep generated ARM templates
+infra/infra-*.json

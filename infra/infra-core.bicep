@@ -7,7 +7,7 @@ targetScope = 'resourceGroup'
 
 var namePrefix = 'vueadmin'
 var uniqueSuffix = uniqueString(resourceGroup().id)
-var pgAdminUser = 'vueadmin'
+var sqlAdminUser = 'vueadmin'
 var kvUniqueSuffix = uniqueString(resourceGroup().id, subscription().subscriptionId)
 
 // ============================================================
@@ -74,102 +74,67 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-03-01'
   }
 }
 
-resource pgStorageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
-  name: '${namePrefix}${uniqueSuffix}st'
+// ============================================================
+// 3. Azure SQL Server + Databases
+// ============================================================
+var sqlServerName = '${namePrefix}${uniqueSuffix}sql'
+
+resource sqlServer 'Microsoft.Sql/servers@2023-08-01-preview' = {
+  name: sqlServerName
   location: location
-  sku: { name: 'Standard_LRS' }
-  kind: 'StorageV2'
-}
-
-resource pgFileService 'Microsoft.Storage/storageAccounts/fileServices@2023-01-01' = {
-  name: 'default'
-  parent: pgStorageAccount
-}
-
-resource pgFileShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-01-01' = {
-  name: 'pgdata'
-  parent: pgFileService
-}
-
-resource pgEnvironmentStorage 'Microsoft.App/managedEnvironments/storages@2024-03-01' = {
-  name: 'pgdata'
-  parent: containerAppsEnvironment
   properties: {
-    azureFile: {
-      accountName: pgStorageAccount.name
-      shareName: pgFileShare.name
-      accessMode: 'ReadWrite'
-      accountKey: pgStorageAccount.listKeys().keys[0].value
-    }
+    administratorLogin: sqlAdminUser
+    administratorLoginPassword: adminPassword
+    minimalTlsVersion: '1.2'
+    publicNetworkAccess: 'Enabled'
+    restrictOutboundNetworkAccess: 'Disabled'
   }
 }
 
-// ============================================================
-// 3. PostgreSQL Container
-// ============================================================
-resource postgresqlContainer 'Microsoft.App/containerApps@2024-03-01' = {
-  name: 'postgresql-${uniqueSuffix}'
-  location: location
-  dependsOn: [ pgEnvironmentStorage ]
+// Allow Azure services (Container Apps, Functions) to access the server
+resource sqlAllowAzureServices 'Microsoft.Sql/servers/firewallRules@2023-08-01-preview' = {
+  name: 'AllowAllAzureIps'
+  parent: sqlServer
   properties: {
-    managedEnvironmentId: containerAppsEnvironment.id
-    configuration: {
-      ingress: {
-        transport: 'Tcp'
-        external: false
-        targetPort: 5432
-        traffic: [
-          {
-            latestRevision: true
-            weight: 100
-          }
-        ]
-      }
-      activeRevisionsMode: 'Single'
-    }
-    template: {
-      scale: { minReplicas: 1, maxReplicas: 1 }
-      containers: [
-        {
-          name: 'postgresql'
-          image: 'docker.io/library/postgres:16-alpine'
-          resources: { cpu: json('0.75'), memory: '1.5Gi' }
-          env: [
-            {
-              name: 'POSTGRES_USER'
-              value: pgAdminUser
-            }
-            {
-              name: 'POSTGRES_PASSWORD'
-              value: adminPassword
-            }
-            {
-              name: 'POSTGRES_DB'
-              value: 'vue_demo_auth'
-            }
-          ]
-          probes: [
-            {
-              type: 'Liveness'
-              tcpSocket: { port: 5432 }
-              initialDelaySeconds: 20
-              periodSeconds: 30
-            }
-            {
-              type: 'Readiness'
-              tcpSocket: { port: 5432 }
-              initialDelaySeconds: 10
-              periodSeconds: 15
-            }
-          ]
-        }
-      ]
-    }
+    startIpAddress: '0.0.0.0'
+    endIpAddress: '0.0.0.0'
   }
 }
 
-var pgInternalHost = 'postgresql-${uniqueSuffix}'
-var pgConnBase = 'Host=${pgInternalHost};Port=5432;Username=${pgAdminUser};Password=${adminPassword}'
+resource sqlDbAuth 'Microsoft.Sql/servers/databases@2023-08-01-preview' = {
+  name: 'vue_demo_auth'
+  parent: sqlServer
+  location: location
+  sku: { name: 'Basic', tier: 'Basic' }
+  properties: { collation: 'SQL_Latin1_General_CP1_CI_AS' }
+}
+
+resource sqlDbTasks 'Microsoft.Sql/servers/databases@2023-08-01-preview' = {
+  name: 'vue_demo_tasks'
+  parent: sqlServer
+  location: location
+  sku: { name: 'Basic', tier: 'Basic' }
+  properties: { collation: 'SQL_Latin1_General_CP1_CI_AS' }
+}
+
+resource sqlDbOrders 'Microsoft.Sql/servers/databases@2023-08-01-preview' = {
+  name: 'vue_demo_orders'
+  parent: sqlServer
+  location: location
+  sku: { name: 'Basic', tier: 'Basic' }
+  properties: { collation: 'SQL_Latin1_General_CP1_CI_AS' }
+}
+
+resource sqlDbPayments 'Microsoft.Sql/servers/databases@2023-08-01-preview' = {
+  name: 'vue_demo_payments'
+  parent: sqlServer
+  location: location
+  sku: { name: 'Basic', tier: 'Basic' }
+  properties: { collation: 'SQL_Latin1_General_CP1_CI_AS' }
+}
+
+var sqlServerFqdn = sqlServer.properties.fullyQualifiedDomainName
+var sqlConnBase = 'Server=${sqlServerFqdn},1433;User Id=${sqlAdminUser};Password=${adminPassword};Encrypt=True;TrustServerCertificate=False;'
 
 // ============================================================
 // 4. Service Bus
@@ -260,10 +225,10 @@ output keyVaultName string = keyVault.name
 output uniqueSuffix string = uniqueSuffix
 output acrLoginServer string = acrLoginServer
 output uaiId string = uai.id
-output pgFqdn string = pgInternalHost
+output sqlServerFqdn string = sqlServerFqdn
+output sqlConnBase string = sqlConnBase
 output containerAppsEnvId string = containerAppsEnvironment.id
 output containerAppsEnvName string = containerAppsEnvName
 output sbConnectionString string = sbConnStr
 output serviceBusName string = serviceBusNamespace.name
-output pgConnBase string = pgConnBase
 output envDomain string = containerAppsEnvironment.properties.defaultDomain

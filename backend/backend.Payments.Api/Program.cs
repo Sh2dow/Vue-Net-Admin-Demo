@@ -59,16 +59,13 @@ if (string.IsNullOrWhiteSpace(ordersDbConnectionString))
 }
 
 builder.Services.AddDbContext<OrdersDbContext>(options =>
-    options.UseNpgsql(ordersDbConnectionString)
-        .UseSnakeCaseNamingConvention());
+    options.UseSqlServer(ordersDbConnectionString));
 
 builder.Services.AddDbContext<PaymentsDbContext>(options =>
-    options.UseNpgsql(paymentsDbConnectionString)
-        .UseSnakeCaseNamingConvention());
+    options.UseSqlServer(paymentsDbConnectionString));
 
 builder.Services.AddDbContext<AuthDbContext>(options =>
-    options.UseNpgsql(authDbConnectionString)
-        .UseSnakeCaseNamingConvention());
+    options.UseSqlServer(authDbConnectionString));
 
 builder.Services.AddScoped<IUserDirectory, EfUserDirectory>();
 builder.Services.AddScoped<IEffectiveUserAccessor, EffectiveUserAccessor>();

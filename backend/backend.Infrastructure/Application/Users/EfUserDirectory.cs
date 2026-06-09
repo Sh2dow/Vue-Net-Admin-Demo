@@ -2,7 +2,7 @@ using backend.Domain.Data;
 using backend.Domain.Models;
 using backend.Shared.Application.Users;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
+using Microsoft.Data.SqlClient;
 
 namespace backend.Infrastructure.Application.Users;
 
@@ -103,7 +103,6 @@ public sealed class EfUserDirectory : IUserDirectory
     }
 
     private static bool IsDuplicateSubjectViolation(DbUpdateException exception) =>
-        exception.InnerException is PostgresException postgresException
-        && postgresException.SqlState == PostgresErrorCodes.UniqueViolation
-        && string.Equals(postgresException.ConstraintName, "ix_app_users_subject", StringComparison.OrdinalIgnoreCase);
+        exception.InnerException is SqlException sqlEx
+        && (sqlEx.Number == 2601 || sqlEx.Number == 2627);
 }

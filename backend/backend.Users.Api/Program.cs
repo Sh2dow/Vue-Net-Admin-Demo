@@ -30,8 +30,7 @@ if (string.IsNullOrWhiteSpace(authDbConnectionString))
 }
 
 builder.Services.AddDbContext<AuthDbContext>(options =>
-    options.UseNpgsql(authDbConnectionString)
-        .UseSnakeCaseNamingConvention()
+    options.UseSqlServer(authDbConnectionString)
         .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning)));
 
 var authAuthority = builder.Configuration["Auth:Authority"];

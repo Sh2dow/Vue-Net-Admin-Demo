@@ -64,9 +64,8 @@ public sealed class AuthDbContextFactory : IDesignTimeDbContextFactory<AuthDbCon
     private static AuthDbContext CreateDbContext(string connectionString)
     {
         var optionsBuilder = new DbContextOptionsBuilder<AuthDbContext>();
-        optionsBuilder.UseNpgsql(connectionString, npgsql =>
-                npgsql.MigrationsAssembly(typeof(AuthDbContext).Assembly.GetName().Name))
-            .UseSnakeCaseNamingConvention()
+        optionsBuilder.UseSqlServer(connectionString, sql =>
+                sql.MigrationsAssembly(typeof(AuthDbContext).Assembly.GetName().Name))
             .UseOpenIddict();
 
         return new AuthDbContext(optionsBuilder.Options);

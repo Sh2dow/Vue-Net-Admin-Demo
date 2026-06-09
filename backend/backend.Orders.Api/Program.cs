@@ -59,12 +59,10 @@ if (string.IsNullOrWhiteSpace(paymentsDbConnectionString))
 }
 
 builder.Services.AddDbContext<OrdersDbContext>(options =>
-    options.UseNpgsql(ordersDbConnectionString)
-        .UseSnakeCaseNamingConvention());
+    options.UseSqlServer(ordersDbConnectionString));
 
 builder.Services.AddDbContext<PaymentsDbContext>(options =>
-    options.UseNpgsql(paymentsDbConnectionString)
-        .UseSnakeCaseNamingConvention());
+    options.UseSqlServer(paymentsDbConnectionString));
 
 builder.Services.Configure<AuthServiceOptions>(builder.Configuration.GetSection(AuthServiceOptions.SectionName));
 

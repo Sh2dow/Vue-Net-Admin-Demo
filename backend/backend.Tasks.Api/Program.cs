@@ -53,12 +53,10 @@ if (string.IsNullOrWhiteSpace(authDbConnectionString))
 }
 
 builder.Services.AddDbContext<TasksDbContext>(options =>
-    options.UseNpgsql(tasksDbConnectionString)
-        .UseSnakeCaseNamingConvention());
+    options.UseSqlServer(tasksDbConnectionString));
 
 builder.Services.AddDbContext<AuthDbContext>(options =>
-    options.UseNpgsql(authDbConnectionString)
-        .UseSnakeCaseNamingConvention());
+    options.UseSqlServer(authDbConnectionString));
 
 builder.Services.AddScoped<IUserDirectory, EfUserDirectory>();
 builder.Services.AddScoped<IEffectiveUserAccessor, EffectiveUserAccessor>();

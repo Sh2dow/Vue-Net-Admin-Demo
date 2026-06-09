@@ -41,8 +41,7 @@ if (string.IsNullOrWhiteSpace(authConnectionString))
 
 builder.Services.AddDbContext<AuthDbContext>(options =>
 {
-    options.UseNpgsql(authConnectionString)
-        .UseSnakeCaseNamingConvention()
+    options.UseSqlServer(authConnectionString)
         .UseOpenIddict()
         .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
 });

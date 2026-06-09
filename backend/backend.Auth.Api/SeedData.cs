@@ -47,7 +47,7 @@ public sealed class SeedData : IHostedService
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "SeedData failed to apply migrations or seed data. The application will continue running, but seeding must be completed manually (e.g., via 'dotnet ef database update'). Common cause: the target PostgreSQL database does not exist yet.");
+                "SeedData failed to apply migrations or seed data. The application will continue running, but seeding must be completed manually (e.g., via 'dotnet ef database update'). Common cause: the target SQL database does not exist yet.");
         }
     }
 
